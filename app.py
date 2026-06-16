@@ -53,27 +53,34 @@ except ModuleNotFoundError:
 ensure_runtime_package("docx", "python-docx")
 try:
     from docx import Document
+    from docx.enum.section import WD_ORIENT
+    from docx.shared import Inches
     from docx.shared import Pt
     DOCX_AVAILABLE = True
 except ModuleNotFoundError:
     Document = None
+    WD_ORIENT = None
+    Inches = None
     Pt = None
     DOCX_AVAILABLE = False
 
 ensure_runtime_package("reportlab", "reportlab")
 try:
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
     REPORTLAB_AVAILABLE = True
 except ModuleNotFoundError:
     A4 = None
+    landscape = None
     mm = None
     pdfmetrics = None
     TTFont = None
     canvas = None
+    ImageReader = None
     REPORTLAB_AVAILABLE = False
 
 ensure_runtime_package("PIL", "Pillow")
@@ -607,35 +614,321 @@ def wrap_text_for_report(text, width=92):
         lines.extend(wrapped or [""])
     return lines
 
+FORM_PAGE_SIZE = (1754, 1240)
+
+def form_text(record, field, default=''):
+    fd = record.get('formDetails', {})
+    if field in record:
+        return str(record.get(field) or default)
+    return str(fd.get(field) or default)
+
+def get_form_fonts():
+    font_path = get_thai_font_path()
+    if font_path and PIL_AVAILABLE:
+        return {
+            'title': ImageFont.truetype(font_path, 24),
+            'subtitle': ImageFont.truetype(font_path, 17),
+            'section': ImageFont.truetype(font_path, 16),
+            'body': ImageFont.truetype(font_path, 14),
+            'small': ImageFont.truetype(font_path, 12),
+            'tiny': ImageFont.truetype(font_path, 10),
+        }
+    return {
+        'title': ImageFont.load_default(),
+        'subtitle': ImageFont.load_default(),
+        'section': ImageFont.load_default(),
+        'body': ImageFont.load_default(),
+        'small': ImageFont.load_default(),
+        'tiny': ImageFont.load_default(),
+    }
+
+def text_size(draw, text, font):
+    box = draw.textbbox((0, 0), str(text), font=font)
+    return box[2] - box[0], box[3] - box[1]
+
+def wrap_text_pixels(draw, text, font, max_width):
+    text = str(text or "")
+    if not text:
+        return [""]
+    lines = []
+    current = ""
+    for ch in text:
+        if ch == "\n":
+            lines.append(current)
+            current = ""
+            continue
+        trial = current + ch
+        if text_size(draw, trial, font)[0] <= max_width or not current:
+            current = trial
+        else:
+            lines.append(current)
+            current = ch
+    if current:
+        lines.append(current)
+    return lines
+
+def draw_text_box(draw, xy, text, font, fill=(17, 24, 39), align='left', max_lines=None):
+    x1, y1, x2, y2 = xy
+    pad = 5
+    line_h = getattr(font, 'size', 14) + 5
+    lines = wrap_text_pixels(draw, text, font, max(10, x2 - x1 - pad * 2))
+    if max_lines is None:
+        max_lines = max(1, int((y2 - y1 - pad * 2) / max(line_h, 1)))
+    lines = lines[:max_lines]
+    y = y1 + pad
+    for line in lines:
+        w, _ = text_size(draw, line, font)
+        if align == 'center':
+            x = x1 + (x2 - x1 - w) / 2
+        elif align == 'right':
+            x = x2 - pad - w
+        else:
+            x = x1 + pad
+        draw.text((x, y), line, font=font, fill=fill)
+        y += line_h
+
+def draw_center_text(draw, xy, text, font, fill=(17, 24, 39)):
+    x1, y1, x2, y2 = xy
+    w, h = text_size(draw, text, font)
+    draw.text((x1 + (x2 - x1 - w) / 2, y1 + (y2 - y1 - h) / 2 - 1), text, font=font, fill=fill)
+
+def draw_section(draw, x, y, w, h, title, fonts):
+    draw.rectangle((x, y, x + w, y + h), outline=(17, 24, 39), width=2, fill=(242, 246, 252))
+    draw_center_text(draw, (x, y, x + w, y + h), title, fonts['section'])
+    return y + h
+
+def draw_row(draw, x, y, w, h, no, label, value, fonts, num_w=42, label_w=350):
+    draw.rectangle((x, y, x + w, y + h), outline=(17, 24, 39), width=1)
+    draw.line((x + num_w, y, x + num_w, y + h), fill=(17, 24, 39), width=1)
+    draw.line((x + num_w + label_w, y, x + num_w + label_w, y + h), fill=(17, 24, 39), width=1)
+    draw_center_text(draw, (x, y, x + num_w, y + h), str(no), fonts['small'])
+    draw_text_box(draw, (x + num_w, y, x + num_w + label_w, y + h), label, fonts['small'])
+    draw_text_box(draw, (x + num_w + label_w, y, x + w, y + h), value, fonts['small'])
+    return y + h
+
+def draw_checkbox(draw, x, y, label, checked, fonts):
+    box = 14
+    draw.rectangle((x, y, x + box, y + box), outline=(17, 24, 39), width=1)
+    if checked:
+        draw.line((x + 3, y + 7, x + 6, y + 11), fill=(17, 24, 39), width=2)
+        draw.line((x + 6, y + 11, x + 12, y + 3), fill=(17, 24, 39), width=2)
+    draw.text((x + box + 6, y - 3), label, font=fonts['tiny'], fill=(17, 24, 39))
+
+def draw_note_lines(draw, x, y, w, rows=3, row_h=34):
+    for i in range(rows):
+        yy = y + (i + 1) * row_h
+        draw.line((x, yy, x + w, yy), fill=(107, 114, 128), width=1)
+
+def build_bt27_form_page1(record):
+    if not PIL_AVAILABLE:
+        return None
+
+    fonts = get_form_fonts()
+    img = Image.new('RGB', FORM_PAGE_SIZE, 'white')
+    draw = ImageDraw.Draw(img)
+    W, H = FORM_PAGE_SIZE
+    ink = (17, 24, 39)
+
+    draw.text((W / 2 - text_size(draw, "รายงานรางชำรุด, หัก, แตกร้าว", fonts['title'])[0] / 2, 36),
+              "รายงานรางชำรุด, หัก, แตกร้าว", font=fonts['title'], fill=ink)
+    draw.text((W - 180, 42), "แบบ บท.27 - 1", font=fonts['small'], fill=ink)
+    draw.text((70, 66), "(ข้อความที่ไม่ต้องการให้ขีดฆ่าออก)", font=fonts['tiny'], fill=ink)
+    draw.text((W / 2 - 220, 72), f"ได้เปลี่ยนแล้วเสร็จเมื่อ {form_text(record, 'completedReplaceAt', '................................')}", font=fonts['small'], fill=ink)
+    draw.text((W - 560, 72), f"เลขที่ {form_text(record, 'reportNo', record.get('id', '........................'))}", font=fonts['small'], fill=ink)
+
+    left_x, top = 65, 115
+    left_w = 715
+    right_x = left_x + left_w
+    right_w = W - right_x - 65
+
+    y = draw_section(draw, left_x, top, left_w, 28, "รายการทั่วไป", fonts)
+    left_rows = [
+        ("1", "ทางประธานหรือทางแยก สาย", form_text(record, 'line')),
+        ("2", "ชั้นของทาง", form_text(record, 'trackClass')),
+        ("3", "ชนิดของทาง", f"{form_text(record, 'trackDirection')}  {form_text(record, 'serviceTrack')}  {form_text(record, 'traction')}"),
+        ("4", "ระหว่างสถานี", f"{form_text(record, 'stationFrom')} และ {form_text(record, 'stationTo')}"),
+        ("5", "กม.", form_text(record, 'km')),
+        ("6", "ลักษณะของทาง", f"{form_text(record, 'alignment')} / {form_text(record, 'curveRadius')} / {form_text(record, 'wetDry')}"),
+        ("7", "ระดับความลาดชันของทาง", form_text(record, 'grade')),
+        ("8", "ตรวจพบที่เป็นจุดที่รถล้อหล่อ หรือเคลื่อนขบวน", form_text(record, 'wheelFlatRemark')),
+        ("9", "จำนวนขบวนรถใน 24 ชม. (ตามสมุดกำหนดเวลาเดินรถ)", f"โดยสาร {form_text(record, 'trainPassenger24h', '0')} ขบวน  สินค้า {form_text(record, 'trainFreight24h', '0')} ขบวน  รวม {form_text(record, 'trainTotal24h', '0')} ขบวน"),
+        ("10", "ความเร็วสูงสุดอนุญาตให้ขบวนรถผ่าน", f"{form_text(record, 'speedLimit')} กม./ชม."),
+    ]
+    for row, h in zip(left_rows, [36, 36, 54, 36, 36, 52, 42, 48, 58, 38]):
+        y = draw_row(draw, left_x, y, left_w, h, *row, fonts, label_w=360)
+
+    y = draw_section(draw, left_x, y, left_w, 28, "รายละเอียดเกี่ยวกับราง", fonts)
+    rail_rows = [
+        ("11", "น้ำหนักและขนาดของราง", f"ขนาดราง {form_text(record, 'railSize')}  ยาว {form_text(record, 'railLength')} ม.  รางเชื่อมยาว {form_text(record, 'cwrLength')} ม."),
+        ("12", "ชนิดของรางที่หัก", form_text(record, 'brokenRailType')),
+        ("13", "เคยกลับหรือเปลี่ยนข้างของรางหรือไม่", form_text(record, 'railSideHistory')),
+        ("14", "น้ำหนักของรางเมื่อหัก / น้ำหนักที่หายไป", f"{form_text(record, 'railWeightAtBreak')} / {form_text(record, 'railWeightLoss')}"),
+        ("15", "เครื่องหมายของรางที่หัก", form_text(record, 'railMark', record.get('railId', ''))),
+        ("16", "รางที่หักวางเมื่อ / สภาพรางเดิม", f"{form_text(record, 'railLaidDate')} / {form_text(record, 'railCondition')}"),
+        ("17", "ถ้าจุดหักอยู่ภายใน 10 ซม. จากรอยเชื่อม", f"วิธีเชื่อม {form_text(record, 'weldMethod')}  เชื่อมครั้งสุดท้าย {form_text(record, 'weldLastDate')}  ซ่อม {form_text(record, 'weldRepairCount')} ครั้ง"),
+        ("18", "หินโรยทาง", form_text(record, 'ballast')),
+        ("19", "วาระการอัดหิน", form_text(record, 'tampingFrequency')),
+    ]
+    for row, h in zip(rail_rows, [58, 50, 42, 50, 42, 42, 78, 40, 40]):
+        y = draw_row(draw, left_x, y, left_w, h, *row, fonts, label_w=360)
+
+    # Right side: track/fishplate details
+    y = draw_section(draw, right_x, top, right_w, 28, "รายละเอียดเกี่ยวกับทาง", fonts)
+    fish_h = 172
+    draw.rectangle((right_x, y, right_x + right_w, y + fish_h), outline=ink, width=1)
+    draw.line((right_x + 42, y, right_x + 42, y + fish_h), fill=ink, width=1)
+    draw.line((right_x + 305, y, right_x + 305, y + fish_h), fill=ink, width=1)
+    draw_center_text(draw, (right_x, y, right_x + 42, y + fish_h), "20", fonts['small'])
+    draw_text_box(draw, (right_x + 42, y, right_x + 305, y + 48), "ถ้ารางหักอยู่ภายในเหล็กประกบราง", fonts['small'])
+    sub_lines = [
+        ("ก. ได้ตัดส่วนที่หักออกหรือเปลี่ยนใหม่ทั้งท่อน", form_text(record, 'jointCutMethod')),
+        ("ข. สภาพของรางบริเวณที่เหล็กประกบรางสัมผัส", form_text(record, 'jointContactCondition')),
+        ("ค. รูของสลักเกลียวต่อราง", form_text(record, 'boltHole')),
+        ("ง. ชนิดของเหล็กประกบราง", form_text(record, 'fishplateType')),
+        ("จ. สภาพของเหล็กประกบราง", form_text(record, 'fishplateCondition')),
+    ]
+    sy = y
+    for label, value in sub_lines:
+        draw.line((right_x + 305, sy, right_x + right_w, sy), fill=ink, width=1)
+        draw_text_box(draw, (right_x + 310, sy, right_x + 620, sy + fish_h / 5), label, fonts['tiny'])
+        draw_text_box(draw, (right_x + 620, sy, right_x + right_w, sy + fish_h / 5), value, fonts['tiny'])
+        sy += fish_h / 5
+    y += fish_h
+    y = draw_row(draw, right_x, y, right_w, 44, "21", "ชนิดและสภาพของหมอน", form_text(record, 'sleeperCondition'), fonts, label_w=300)
+    y = draw_row(draw, right_x, y, right_w, 70, "22", "ถ้าปรากฏว่าเคยมีรางหักในระยะใกล้เคียงมาก่อน ให้แจ้ง วัน เดือน ปี และ กม.", form_text(record, 'nearbyBreakRecord'), fonts, label_w=300)
+
+    y = draw_section(draw, right_x, y, right_w, 28, "รายละเอียดเกี่ยวกับรางหัก, แตก, ร้าว", fonts)
+    defect_rows = [
+        ("23", "ตรวจพบเมื่อวันที่", f"{record.get('date', '')} เวลา {record.get('time', '')} โดย {form_text(record, 'foundBy')} ขณะ {form_text(record, 'foundContext')}"),
+        ("24", "อุณหภูมิขณะพบรางชำรุด, หัก, ร้าว", form_text(record, 'railTemperature')),
+        ("25", "ลักษณะของรอยร้าว", form_text(record, 'crackAge')),
+        ("26", "จุดที่ชำรุด หัก ร้าว มีรอยล้อกระแทก", form_text(record, 'wheelImpact')),
+        ("27", "รางที่นำมาเปลี่ยนใหม่", f"ขนาด {form_text(record, 'replacementRailSize')}  ยาว {form_text(record, 'replacementRailLength')} ม.  {form_text(record, 'replacementRailType')}"),
+    ]
+    for row, h in zip(defect_rows, [46, 38, 38, 38, 44]):
+        y = draw_row(draw, right_x, y, right_w, h, *row, fonts, label_w=300)
+
+    y = draw_section(draw, right_x, y, right_w, 28, "การชำรุดเสียหายบริเวณหัวราง (ถ้ามี)", fonts)
+    head_h = 122
+    draw.rectangle((right_x, y, right_x + right_w, y + head_h), outline=ink, width=1)
+    draw.line((right_x + 42, y, right_x + 42, y + head_h), fill=ink, width=1)
+    draw.line((right_x + 305, y, right_x + 305, y + head_h), fill=ink, width=1)
+    draw_center_text(draw, (right_x, y, right_x + 42, y + head_h), "28", fonts['small'])
+    draw_text_box(draw, (right_x + 42, y, right_x + 305, y + head_h), "ลักษณะความเสียหายบริเวณหัวราง", fonts['small'])
+    selected = form_text(record, 'headDamage')
+    if isinstance(record.get('formDetails', {}).get('headDamage'), list):
+        selected_items = record.get('formDetails', {}).get('headDamage', [])
+    else:
+        selected_items = [selected]
+    labels = [
+        ("รางลอก (Spalling)", 0, 0),
+        ("ร่องหลุม (Squat)", 235, 0),
+        ("ลื่นรางเป็นคลื่น (Corrugation)", 440, 0),
+        ("การแตกมุมรางด้านในเป็นชิ้นเล็ก", 0, 34),
+        ("ล้อดัน (Wheel Burn)", 0, 68),
+        ("บุ๋มสนิม (Belgrospi)", 235, 68),
+        ("การแตกมุมรางด้านใน (Shelling)", 440, 68),
+        ("การแตกเป็นเส้น (Head Check)", 0, 100),
+        ("อื่นๆ", 300, 100),
+    ]
+    for label, dx, dy in labels:
+        checked = any(label.split(" ")[0] in item or label in item for item in selected_items)
+        draw_checkbox(draw, right_x + 318 + dx, y + 12 + dy, label, checked, fonts)
+    y += head_h
+
+    note_y = y + 28
+    draw.text((right_x, note_y), "หมายเหตุ", font=fonts['small'], fill=ink)
+    draw_note_lines(draw, right_x + 70, note_y - 8, right_w - 90, rows=3, row_h=32)
+    draw_text_box(draw, (right_x + 78, note_y - 8, right_x + right_w - 8, note_y + 90), form_text(record, 'note'), fonts['tiny'])
+
+    sig_y = H - 150
+    draw.text((right_x + 80, sig_y), "(................................................)", font=fonts['small'], fill=ink)
+    draw.text((right_x + 118, sig_y + 26), "สารวัตรแขวงบำรุงทาง", font=fonts['small'], fill=ink)
+    draw.text((right_x + 82, sig_y + 52), "วันที่......... เดือน .................. พ.ศ. ..............", font=fonts['small'], fill=ink)
+    draw.text((right_x + 455, sig_y), "(................................................)", font=fonts['small'], fill=ink)
+    draw.text((right_x + 470, sig_y + 26), "วิศวกรกำกับการกองบำรุงทางเขต", font=fonts['small'], fill=ink)
+    draw.text((right_x + 455, sig_y + 52), "วันที่......... เดือน .................. พ.ศ. ..............", font=fonts['small'], fill=ink)
+    draw.text((W - 125, H - 58), "(พลิก)", font=fonts['section'], fill=ink)
+    return img
+
+def build_bt27_form_page2(record):
+    if not PIL_AVAILABLE:
+        return None
+
+    fonts = get_form_fonts()
+    img = Image.new('RGB', FORM_PAGE_SIZE, 'white')
+    draw = ImageDraw.Draw(img)
+    W, H = FORM_PAGE_SIZE
+    ink = (17, 24, 39)
+    left = 90
+    top = 110
+
+    title = "การเขียนรูปแสดงรางหัก - แตก - ร้าว"
+    draw.text((left, top), title, font=fonts['section'], fill=ink)
+    draw.line((left, top + 24, left + text_size(draw, title, fonts['section'])[0], top + 24), fill=ink, width=1)
+    instructions = [
+        "1. เขียนรูปทางด้านบน (Plan) ด้านข้าง (Elevation) รูปตัด (Section) และลูกศร",
+        "   แสดงทิศทางขบวนรถขึ้น - ล่อง เฉพาะรูปตัดเขียนเท่าของจริง",
+        "2. รอยที่หัก แตก ร้าว ใหม่ แสดงด้วยสีแดง รอยเก่าด้วยสีดำ",
+        "3. แจ้งระยะรอยหัก แตก ร้าว ห่างจากศูนย์กลางจากเรียงรางของหมอนทั้ง 2 ข้าง",
+        "   และระยะของหมอนข้างเคียงอีกด้วย",
+        "4. หากรอยหัก แตก ร้าว ติดต่อถึงรูสลักเกลียว ให้ขีดเส้นผ่านศูนย์กลางของรูสลักเกลียว",
+        "   ที่รอยร้าว แตก มาบรรจบ",
+    ]
+    y = top + 48
+    for line in instructions:
+        draw.text((left + 45, y), line, font=fonts['small'], fill=ink)
+        y += 30
+
+    left_title = "รูปด้านบนและด้านข้าง (Plan and Elevation)"
+    draw.text((left, 360), left_title, font=fonts['section'], fill=ink)
+    draw.line((left, 384, left + text_size(draw, left_title, fonts['section'])[0], 384), fill=ink, width=1)
+    draw.rectangle((left, 410, W / 2 - 45, H - 70), outline=(225, 229, 235), width=1)
+    draw_text_box(draw, (left + 10, 420, W / 2 - 55, 455), form_text(record, 'note'), fonts['tiny'], fill=(107, 114, 128))
+
+    cut_title = "รูปตัด (เท่าของจริง)"
+    draw.text((W / 2 + 110, top + 10), cut_title, font=fonts['section'], fill=ink)
+    draw.line((W / 2 + 110, top + 34, W / 2 + 110 + text_size(draw, cut_title, fonts['section'])[0], top + 34), fill=ink, width=1)
+    draw.rectangle((W / 2 + 30, top + 70, W - 90, H - 70), outline=(225, 229, 235), width=1)
+    draw_text_box(draw, (W / 2 + 45, top + 85, W - 105, top + 125), form_text(record, 'foundPosition'), fonts['tiny'], fill=(107, 114, 128))
+    return img
+
+def build_bt27_form_pages(record):
+    page1 = build_bt27_form_page1(record)
+    page2 = build_bt27_form_page2(record)
+    return [page for page in (page1, page2) if page is not None]
+
+def image_to_png_bytes(image):
+    buffer = BytesIO()
+    image.save(buffer, format='PNG')
+    return buffer.getvalue()
+
+def image_to_jpg_bytes(image):
+    buffer = BytesIO()
+    image.save(buffer, format='JPEG', quality=94)
+    return buffer.getvalue()
+
 def build_bt27_docx_bytes(record):
     if not DOCX_AVAILABLE:
         return None
 
     buffer = BytesIO()
     doc = Document()
-    styles = doc.styles
-    styles['Normal'].font.name = 'TH Sarabun New'
-    styles['Normal'].font.size = Pt(14)
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = Inches(11.69)
+    section.page_height = Inches(8.27)
+    section.top_margin = Inches(0.18)
+    section.bottom_margin = Inches(0.18)
+    section.left_margin = Inches(0.18)
+    section.right_margin = Inches(0.18)
 
-    title = doc.add_heading('รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)', level=1)
-    for run in title.runs:
-        run.font.name = 'TH Sarabun New'
-        run.font.size = Pt(18)
-
-    for line in build_bt27_report_text(record).splitlines()[2:]:
-        if not line:
-            doc.add_paragraph("")
-        elif line in (
-            "1-10 รายการทั่วไป",
-            "11-19 รายละเอียดเกี่ยวกับราง",
-            "20-22 รายละเอียดเกี่ยวกับทางและเหล็กประกบราง",
-            "23-28 รายละเอียดเกี่ยวกับรางชำรุด หัก แตกร้าว",
-            "พิกัด/หมายเหตุ/การดำเนินการ",
-            "ข้อมูลผู้รายงาน",
-        ):
-            doc.add_heading(line, level=2)
-        else:
-            doc.add_paragraph(line)
+    pages = build_bt27_form_pages(record)
+    usable_width = section.page_width - section.left_margin - section.right_margin
+    for idx, page in enumerate(pages):
+        if idx:
+            doc.add_page_break()
+        doc.add_picture(BytesIO(image_to_png_bytes(page)), width=usable_width)
 
     doc.save(buffer)
     return buffer.getvalue()
@@ -644,48 +937,14 @@ def build_bt27_pdf_bytes(record):
     if not REPORTLAB_AVAILABLE:
         return None
 
-    font_path = get_thai_font_path()
-    font_name = 'Helvetica'
-    if font_path:
-        font_name = 'NotoSansThai'
-        try:
-            pdfmetrics.registerFont(TTFont(font_name, font_path))
-        except Exception:
-            font_name = 'Helvetica'
-
     buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    page_width, page_height = A4
-    left = 18 * mm
-    top = page_height - 18 * mm
-    line_height = 6.4 * mm
-    y = top
-
-    def draw_line(text, size=11, bold=False):
-        nonlocal y
-        if y < 18 * mm:
-            pdf.showPage()
-            y = top
-        pdf.setFont(font_name, size)
-        pdf.drawString(left, y, str(text))
-        y -= line_height if not bold else line_height + 1.5 * mm
-
-    draw_line("รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)", 16, True)
-    draw_line(f"เลขที่ระบบ {record.get('id', '-')}", 11)
-    y -= 2 * mm
-
-    for line in wrap_text_for_report(build_bt27_report_text(record), width=95)[2:]:
-        if line in (
-            "1-10 รายการทั่วไป",
-            "11-19 รายละเอียดเกี่ยวกับราง",
-            "20-22 รายละเอียดเกี่ยวกับทางและเหล็กประกบราง",
-            "23-28 รายละเอียดเกี่ยวกับรางชำรุด หัก แตกร้าว",
-            "พิกัด/หมายเหตุ/การดำเนินการ",
-            "ข้อมูลผู้รายงาน",
-        ):
-            draw_line(line, 13, True)
-        else:
-            draw_line(line, 10.5)
+    page_size = landscape(A4)
+    pdf = canvas.Canvas(buffer, pagesize=page_size)
+    page_width, page_height = page_size
+    for page in build_bt27_form_pages(record):
+        image_reader = ImageReader(BytesIO(image_to_png_bytes(page)))
+        pdf.drawImage(image_reader, 0, 0, width=page_width, height=page_height, preserveAspectRatio=True, anchor='c')
+        pdf.showPage()
 
     pdf.save()
     return buffer.getvalue()
@@ -694,48 +953,13 @@ def build_bt27_image_bytes(record, image_format='PNG'):
     if not PIL_AVAILABLE:
         return None
 
-    font_path = get_thai_font_path()
-    if font_path:
-        title_font = ImageFont.truetype(font_path, 34)
-        body_font = ImageFont.truetype(font_path, 22)
-    else:
-        title_font = ImageFont.load_default()
-        body_font = ImageFont.load_default()
-
-    wrapped_lines = wrap_text_for_report(build_bt27_report_text(record), width=78)
-    width = 1600
-    padding = 72
-    line_height = 36
-    title_height = 62
-    height = padding * 2 + title_height + (len(wrapped_lines) * line_height)
-    bg = 'white'
-    image = Image.new('RGB', (width, max(height, 900)), bg)
-    draw = ImageDraw.Draw(image)
-
-    draw.rectangle((0, 0, width, 110), fill=(15, 47, 95))
-    draw.text((padding, 30), "รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)", font=title_font, fill='white')
-    y = 140
-    for line in wrapped_lines[2:]:
-        fill = (17, 24, 39)
-        if line in (
-            "1-10 รายการทั่วไป",
-            "11-19 รายละเอียดเกี่ยวกับราง",
-            "20-22 รายละเอียดเกี่ยวกับทางและเหล็กประกบราง",
-            "23-28 รายละเอียดเกี่ยวกับรางชำรุด หัก แตกร้าว",
-            "พิกัด/หมายเหตุ/การดำเนินการ",
-            "ข้อมูลผู้รายงาน",
-        ):
-            draw.text((padding, y), line, font=body_font, fill=(29, 78, 216))
-        else:
-            draw.text((padding, y), line, font=body_font, fill=fill)
-        y += line_height
-
-    buffer = BytesIO()
+    pages = build_bt27_form_pages(record)
+    if not pages:
+        return None
+    page = pages[0]
     if image_format.upper() == 'JPEG':
-        image.save(buffer, format='JPEG', quality=92)
-    else:
-        image.save(buffer, format='PNG')
-    return buffer.getvalue()
+        return image_to_jpg_bytes(page)
+    return image_to_png_bytes(page)
 
 def save_report_files(record):
     report_dir = APP_DIR / 'data' / 'reports'
