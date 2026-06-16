@@ -11,6 +11,8 @@ import sys
 import subprocess
 import importlib
 import importlib.util
+import zipfile
+import zlib
 from pathlib import Path
 import random
 import csv
@@ -50,7 +52,6 @@ except ModuleNotFoundError:
     go = None
     PLOTLY_AVAILABLE = False
 
-ensure_runtime_package("docx", "python-docx")
 try:
     from docx import Document
     from docx.enum.section import WD_ORIENT
@@ -64,7 +65,6 @@ except ModuleNotFoundError:
     Pt = None
     DOCX_AVAILABLE = False
 
-ensure_runtime_package("reportlab", "reportlab")
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
@@ -908,9 +908,184 @@ def image_to_jpg_bytes(image):
     image.save(buffer, format='JPEG', quality=94)
     return buffer.getvalue()
 
-def build_bt27_docx_bytes(record):
-    if not DOCX_AVAILABLE:
+def build_docx_from_images_fallback(pages):
+    if not pages:
         return None
+
+    png_images = [image_to_png_bytes(page) for page in pages]
+    image_rels = "\n".join(
+        f'<Relationship Id="rId{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image{i}.png"/>'
+        for i in range(1, len(png_images) + 1)
+    )
+    content_overrides = "\n".join(
+        f'<Override PartName="/word/media/image{i}.png" ContentType="image/png"/>'
+        for i in range(1, len(png_images) + 1)
+    )
+
+    cx = 10050000
+    cy = 7100000
+    drawings = []
+    for i in range(1, len(png_images) + 1):
+        page_break = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>' if i > 1 else ''
+        drawings.append(f"""{page_break}
+<w:p>
+  <w:r>
+    <w:drawing>
+      <wp:inline distT="0" distB="0" distL="0" distR="0">
+        <wp:extent cx="{cx}" cy="{cy}"/>
+        <wp:docPr id="{i}" name="BT27 Page {i}"/>
+        <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+            <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+              <pic:nvPicPr>
+                <pic:cNvPr id="{i}" name="bt27_page_{i}.png"/>
+                <pic:cNvPicPr/>
+              </pic:nvPicPr>
+              <pic:blipFill>
+                <a:blip r:embed="rId{i}"/>
+                <a:stretch><a:fillRect/></a:stretch>
+              </pic:blipFill>
+              <pic:spPr>
+                <a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>
+                <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+              </pic:spPr>
+            </pic:pic>
+          </a:graphicData>
+        </a:graphic>
+      </wp:inline>
+    </w:drawing>
+  </w:r>
+</w:p>""")
+
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+ xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+  <w:body>
+    {''.join(drawings)}
+    <w:sectPr>
+      <w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>
+      <w:pgMar w:top="180" w:right="180" w:bottom="180" w:left="180" w:header="0" w:footer="0" w:gutter="0"/>
+    </w:sectPr>
+  </w:body>
+</w:document>"""
+
+    content_types = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  {content_overrides}
+</Types>"""
+
+    package_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>"""
+
+    document_rels = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  {image_rels}
+</Relationships>"""
+
+    now_iso = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    core_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:dcterms="http://purl.org/dc/terms/"
+ xmlns:dcmitype="http://purl.org/dc/dcmitype/"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>รายงานรางชำรุด หัก แตกร้าว แบบ บท.27</dc:title>
+  <dc:creator>Rail Damage Reporting System</dc:creator>
+  <dcterms:created xsi:type="dcterms:W3CDTF">{now_iso}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">{now_iso}</dcterms:modified>
+</cp:coreProperties>"""
+    app_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+ xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Rail Damage Reporting System</Application>
+</Properties>"""
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as docx_zip:
+        docx_zip.writestr('[Content_Types].xml', content_types)
+        docx_zip.writestr('_rels/.rels', package_rels)
+        docx_zip.writestr('word/document.xml', document_xml)
+        docx_zip.writestr('word/_rels/document.xml.rels', document_rels)
+        docx_zip.writestr('docProps/core.xml', core_xml)
+        docx_zip.writestr('docProps/app.xml', app_xml)
+        for i, image_bytes in enumerate(png_images, start=1):
+            docx_zip.writestr(f'word/media/image{i}.png', image_bytes)
+    return buffer.getvalue()
+
+def build_pdf_from_images_fallback(pages):
+    if not pages:
+        return None
+
+    page_w, page_h = 841.8898, 595.2756
+    objects = []
+
+    def add_obj(data):
+        objects.append(data)
+        return len(objects)
+
+    catalog_id = add_obj(b"<< /Type /Catalog /Pages 2 0 R >>")
+    pages_id = add_obj(None)
+    page_ids = []
+
+    for idx, page in enumerate(pages, start=1):
+        jpg = image_to_jpg_bytes(page)
+        img_w, img_h = page.size
+        image_id = add_obj(
+            b"<< /Type /XObject /Subtype /Image /Width " + str(img_w).encode() +
+            b" /Height " + str(img_h).encode() +
+            b" /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + str(len(jpg)).encode() +
+            b" >>\nstream\n" + jpg + b"\nendstream"
+        )
+        content = f"q\n{page_w:.4f} 0 0 {page_h:.4f} 0 0 cm\n/Im{idx} Do\nQ\n".encode("ascii")
+        content_id = add_obj(
+            b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"endstream"
+        )
+        page_id = add_obj(
+            f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {page_w:.4f} {page_h:.4f}] "
+            f"/Resources << /XObject << /Im{idx} {image_id} 0 R >> >> /Contents {content_id} 0 R >>".encode("ascii")
+        )
+        page_ids.append(page_id)
+
+    kids = " ".join(f"{pid} 0 R" for pid in page_ids).encode("ascii")
+    objects[pages_id - 1] = b"<< /Type /Pages /Kids [ " + kids + b" ] /Count " + str(len(page_ids)).encode() + b" >>"
+
+    buffer = BytesIO()
+    buffer.write(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for obj_id, data in enumerate(objects, start=1):
+        offsets.append(buffer.tell())
+        buffer.write(f"{obj_id} 0 obj\n".encode("ascii"))
+        buffer.write(data)
+        buffer.write(b"\nendobj\n")
+
+    xref_pos = buffer.tell()
+    buffer.write(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    buffer.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        buffer.write(f"{offset:010d} 00000 n \n".encode("ascii"))
+    buffer.write(
+        f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_id} 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("ascii")
+    )
+    return buffer.getvalue()
+
+def build_bt27_docx_bytes(record):
+    pages = build_bt27_form_pages(record)
+    if not pages:
+        return None
+
+    if not DOCX_AVAILABLE:
+        return build_docx_from_images_fallback(pages)
 
     buffer = BytesIO()
     doc = Document()
@@ -923,7 +1098,6 @@ def build_bt27_docx_bytes(record):
     section.left_margin = Inches(0.18)
     section.right_margin = Inches(0.18)
 
-    pages = build_bt27_form_pages(record)
     usable_width = section.page_width - section.left_margin - section.right_margin
     for idx, page in enumerate(pages):
         if idx:
@@ -934,14 +1108,18 @@ def build_bt27_docx_bytes(record):
     return buffer.getvalue()
 
 def build_bt27_pdf_bytes(record):
-    if not REPORTLAB_AVAILABLE:
+    pages = build_bt27_form_pages(record)
+    if not pages:
         return None
+
+    if not REPORTLAB_AVAILABLE:
+        return build_pdf_from_images_fallback(pages)
 
     buffer = BytesIO()
     page_size = landscape(A4)
     pdf = canvas.Canvas(buffer, pagesize=page_size)
     page_width, page_height = page_size
-    for page in build_bt27_form_pages(record):
+    for page in pages:
         image_reader = ImageReader(BytesIO(image_to_png_bytes(page)))
         pdf.drawImage(image_reader, 0, 0, width=page_width, height=page_height, preserveAspectRatio=True, anchor='c')
         pdf.showPage()
@@ -1012,7 +1190,7 @@ def render_report_downloads(report_data, show_message=True):
             use_container_width=True,
         )
     else:
-        d1.error("DOCX ยังสร้างไม่ได้: ต้องมี python-docx ใน requirements.txt")
+        d1.error("DOCX ยังสร้างไม่ได้: ต้องมี Pillow หรือ python-docx")
 
     if report_data.get('pdf'):
         d2.download_button(
@@ -1023,7 +1201,7 @@ def render_report_downloads(report_data, show_message=True):
             use_container_width=True,
         )
     else:
-        d2.error("PDF ยังสร้างไม่ได้: ต้องมี reportlab ใน requirements.txt")
+        d2.error("PDF ยังสร้างไม่ได้: ต้องมี Pillow หรือ reportlab")
 
     if report_data.get('png'):
         d3.download_button(
@@ -1403,7 +1581,10 @@ with st.sidebar:
     if AUTO_INSTALL_NOTES:
         with st.expander("สถานะแพ็กเกจสร้างรายงาน"):
             for note in AUTO_INSTALL_NOTES:
-                st.caption(note)
+                if "python-docx" in note or "reportlab" in note:
+                    st.caption(f"{note} - ระบบมีตัวสร้างไฟล์สำรองให้ใช้งานต่อได้")
+                else:
+                    st.caption(note)
 
 # Topbar
 st.markdown("""
