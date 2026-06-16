@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 
-app = Flask(__name__)
 app.config['JSON_THAI_ENABLED'] = True
 
 # Database file
@@ -66,10 +65,6 @@ STATUS_MAP = {
 }
 
 
-@app.route('/')
-def index():
-    """Main page"""
-    return render_template('index.html', departments=DEPARTMENTS)
 
 
 @app.route('/api/records', methods=['GET'])
@@ -273,5 +268,3 @@ def server_error(error):
     return jsonify({'error': 'Server error'}), 500
 
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
