@@ -1,272 +1,229 @@
 """
-Rail Damage Reporting System - Flask Application
+Rail Damage Reporting System - Streamlit Application
 ระบบรายงานรางชำรุดหักแตกร้าว
 """
 
-from flask import Flask, request, jsonify # เพิ่มกลับเข้ามา
+import streamlit as st
 from datetime import datetime
 import json
 import os
 from pathlib import Path
 import random
+import csv
+from io import StringIO
 
-# กำหนดตัวแปร app ให้ Flask รู้จัก
-app = Flask(__name__)
-app.config['JSON_THAI_ENABLED'] = True
+# ตั้งค่าหน้าตาของแอปพลิเคชัน
+st.set_page_config(
+    page_title="ระบบรายงานรางชำรุดหักแตกร้าว",
+    page_icon="🛤️",
+    layout="wide"
+)
 
-# Database file
+# ----------------- ส่วนจัดการฐานข้อมูล (JSON) -----------------
 DATA_FILE = 'data/rail_damage_records.json'
 Path('data').mkdir(exist_ok=True)
 
-
 def load_records():
-    """Load all records from JSON file"""
+    """โหลดข้อมูลทั้งหมดจากไฟล์ JSON"""
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
     return []
 
-
 def save_records(records):
-    """Save records to JSON file"""
+    """บันทึกข้อมูลลงไฟล์ JSON"""
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
 
-
 def generate_id():
-    """Generate unique report ID"""
+    """สร้างรหัสรายงานแบบไม่ซ้ำ (Unique ID)"""
     records = load_records()
     year = datetime.now().year
     num = len(records) + 1
     suffix = ''.join([chr(random.randint(65, 90)) for _ in range(3)])
     return f'RPT-{year}-{num:04d}-{suffix}'
 
-
+# ----------------- ข้อมูลมาสเตอร์ (Constants) -----------------
 DEPARTMENTS = [
-    "ศูนย์อาคารและสถานที่",
-    "กองบำรุงอาคารสถานที่เขตกรุงเทพ",
-    "พสถ.กรุงเทพ",
-    "พสถ.เชียงใหม่",
-    "พสถ.ขอนแก่น",
-    "พสถ.นครราชสีมา",
-    "พสถ.อุดรธานี",
-    "พสถ.นครสวรรค์",
-    "พสถ.สมุทรปราการ",
-    "พสถ.ชลบุรี"
+    "ศูนย์อาคารและสถานที่", "กองบำรุงอาคารสถานที่เขตกรุงเทพ", "พสถ.กรุงเทพ",
+    "พสถ.เชียงใหม่", "พสถ.ขอนแก่น", "พสถ.นครราชสีมา", "พสถ.อุดรธานี",
+    "พสถ.นครสวรรค์", "พสถ.สมุทรปราการ", "พสถ.ชลบุรี"
 ]
 
-SEVERITY_MAP = {
-    'low': 'ต่ำ',
-    'med': 'ปานกลาง',
-    'high': 'สูง'
-}
+SEVERITY_MAP = {'low': 'ต่ำ', 'med': 'ปานกลาง', 'high': 'สูง'}
+STATUS_MAP = {'pending': 'รอดำเนินการ', 'inprog': 'กำลังซ่อมแซม', 'done': 'ซ่อมแซมแล้ว'}
 
-STATUS_MAP = {
-    'pending': 'รอดำเนินการ',
-    'inprog': 'กำลังซ่อมแซม',
-    'done': 'ซ่อมแซมแล้ว'
-}
+# ----------------- หน้าตาโปรแกรม (UI) -----------------
+st.title("🛤️ ระบบรายงานรางชำรุดหักแตกร้าว")
+st.markdown("---")
 
-@app.route('/api/records', methods=['GET'])
-def get_records():
-    """Get all records"""
-    records = load_records()
-    return jsonify(records)
+# แบ่งหน้าจอเป็น 3 แท็บหลัก (แดชบอร์ด, รายงานใหม่, จัดการข้อมูล)
+tab1, tab2, tab3 = st.tabs(["📊 แดชบอร์ดสถิติ", "📝 ส่งรายงานชำรุดใหม่", "📋 รายการรายงานทั้งหมด"])
 
+records = load_records()
 
-@app.route('/api/records', methods=['POST'])
-def create_record():
-    """Create new damage report"""
-    try:
-        data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['date', 'line', 'type', 'severity']
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
-        # Create new record
-        record = {
-            'id': generate_id(),
-            'date': data.get('date'),
-            'time': data.get('time', ''),
-            'line': data.get('line'),
-            'station': data.get('station', ''),
-            'km': data.get('km'),
-            'railId': data.get('railId', ''),
-            'lat': data.get('lat'),
-            'lng': data.get('lng'),
-            'type': data.get('type'),
-            'length': data.get('length'),
-            'severity': data.get('severity'),
-            'detail': data.get('detail', ''),
-            'action': data.get('action', ''),
-            'images': data.get('images', []),
-            'reporter': data.get('reporter', ''),
-            'position': data.get('position', ''),
-            'dept': data.get('dept', ''),
-            'phone': data.get('phone', ''),
-            'status': data.get('status', 'pending'),
-            'dueDate': data.get('dueDate', ''),
-            'note': data.get('note', ''),
-            'createdAt': datetime.now().isoformat(),
-            'updatedAt': datetime.now().isoformat()
-        }
-        
-        records = load_records()
-        records.append(record)
-        save_records(records)
-        
-        return jsonify({'success': True, 'id': record['id']}), 201
+# ================= TAB 1: แดชบอร์ดสถิติ =================
+with tab1:
+    st.header("ภาพรวมและสถิติข้อมูล")
     
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/records/<record_id>', methods=['GET'])
-def get_record(record_id):
-    """Get specific record"""
-    records = load_records()
-    for record in records:
-        if record['id'] == record_id:
-            return jsonify(record)
-    return jsonify({'error': 'Not found'}), 404
-
-
-@app.route('/api/records/<record_id>', methods=['PUT'])
-def update_record(record_id):
-    """Update damage report"""
-    try:
-        data = request.get_json()
-        records = load_records()
+    total_reports = len(records)
+    high_severity = len([r for r in records if r.get('severity') == 'high'])
+    pending_status = len([r for r in records if r.get('status') == 'pending'])
+    resolved_status = len([r for r in records if r.get('status') == 'done'])
+    
+    # แสดงการ์ดตัวเลข (Metrics)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("รายงานทั้งหมด", f"{total_reports} รายการ")
+    col2.metric("ความรุนแรงสูง 🚨", f"{high_severity} รายการ")
+    col3.metric("รอดำเนินการ ⏳", f"{pending_status} รายการ")
+    col4.metric("ซ่อมแซมแล้ว ✅", f"{resolved_status} รายการ")
+    
+    if total_reports > 0:
+        st.markdown("### สถิติแยกตามประเภท")
+        col_chart1, col_chart2 = st.columns(2)
         
-        for i, record in enumerate(records):
-            if record['id'] == record_id:
-                # Update fields
-                for key, value in data.items():
-                    if key != 'id' and key != 'createdAt':
-                        record[key] = value
-                record['updatedAt'] = datetime.now().isoformat()
+        with col_chart1:
+            st.subheader("ระดับความรุนแรง")
+            sev_data = {}
+            for sev, name in SEVERITY_MAP.items():
+                sev_data[name] = len([r for r in records if r.get('severity') == sev])
+            st.bar_chart(sev_data)
+            
+        with col_chart2:
+            st.subheader("สถานะการดำเนินงาน")
+            stat_data = {}
+            for stat, name in STATUS_MAP.items():
+                stat_data[name] = len([r for r in records if r.get('status') == stat])
+            st.bar_chart(stat_data)
+    else:
+        st.info("ยังไม่มีข้อมูลในระบบที่จะนำมาแสดงสถิติได้")
+
+# ================= TAB 2: ส่งรายงานชำรุดใหม่ =================
+with tab2:
+    st.header("ฟอร์มแจ้งรายงานรางชำรุด")
+    
+    with st.form("new_report_form", clear_on_submit=True):
+        col_f1, col_f2 = st.columns(2)
+        
+        with col_f1:
+            date_input = st.date_input("วันที่พบเหตุ", datetime.now())
+            time_input = st.text_input("เวลาที่พบเหตุ (เช่น 14:30)", datetime.now().strftime("%H:%M"))
+            line_input = st.text_input("สายทาง (เช่น สายเหนือ, สายใต้) *")
+            station_input = st.text_input("สถานีใกล้เคียง")
+            km_input = st.text_input("กิโลเมตรที่ (KM)")
+            rail_id_input = st.text_input("หมายเลขราง (Rail ID)")
+            
+        with col_f2:
+            type_input = st.text_input("ประเภทความชำรุด (เช่น รางแตก, รางร้าว) *")
+            length_input = st.text_input("ความยาวชำรุด (เมตร/เซนติเมตร)")
+            severity_input = st.selectbox("ระดับความรุนแรง *", options=list(SEVERITY_MAP.keys()), format_func=lambda x: SEVERITY_MAP[x])
+            detail_input = st.text_area("รายละเอียดเพิ่มเติม")
+            action_input = st.text_area("การดำเนินการเบื้องต้น")
+
+        st.markdown("#### ข้อมูลผู้รายงาน")
+        col_f3, col_f4 = st.columns(2)
+        with col_f3:
+            reporter_input = st.text_input("ชื่อ-นามสกุล ผู้รายงาน")
+            position_input = st.text_input("ตำแหน่ง")
+        with col_f4:
+            dept_input = st.selectbox("หน่วยงาน/ฝ่าย", options=DEPARTMENTS)
+            phone_input = st.text_input("เบอร์โทรศัพท์ติดต่อ")
+            
+        submit_btn = st.form_submit_button("💾 บันทึกรายงาน")
+        
+        if submit_btn:
+            # ตรวจสอบข้อมูลบังคับกรอก (Validation)
+            if not line_input or not type_input:
+                st.error("กรุณากรอกข้อมูลในช่องที่มีเครื่องหมาย * ให้ครบถ้วน")
+            else:
+                new_record = {
+                    'id': generate_id(),
+                    'date': str(date_input),
+                    'time': time_input,
+                    'line': line_input,
+                    'station': station_input,
+                    'km': km_input,
+                    'railId': rail_id_input,
+                    'type': type_input,
+                    'length': length_input,
+                    'severity': severity_input,
+                    'detail': detail_input,
+                    'action': action_input,
+                    'images': [],
+                    'reporter': reporter_input,
+                    'position': position_input,
+                    'dept': dept_input,
+                    'phone': phone_input,
+                    'status': 'pending',
+                    'dueDate': '',
+                    'note': '',
+                    'createdAt': datetime.now().isoformat(),
+                    'updatedAt': datetime.now().isoformat()
+                }
+                
+                records.append(new_record)
                 save_records(records)
-                return jsonify({'success': True})
+                st.success(f"บันทึกรายงานสำเร็จ! รหัสเอกสารของคุณคือ: {new_record['id']}")
+                st.rerun()
+
+# ================= TAB 3: รายการรายงานทั้งหมด =================
+with tab3:
+    st.header("รายการที่ถูกบันทึกไว้ในระบบ")
+    
+    if len(records) > 0:
+        # ปุ่มสำหรับ Export เป็น CSV
+        output = StringIO()
+        writer = csv.writer(output, lineterminator='\n')
+        writer.writerow(['รหัส', 'วันที่', 'เวลา', 'สาย', 'สถานี', 'ประเภท', 'ความรุนแรง', 'สถานะ', 'ผู้รายงาน'])
+        for r in records:
+            writer.writerow([
+                r.get('id'), r.get('date'), r.get('time'), r.get('line'), r.get('station'),
+                r.get('type'), SEVERITY_MAP.get(r.get('severity'), ''), STATUS_MAP.get(r.get('status'), ''), r.get('reporter')
+            ])
+        csv_data = output.getvalue()
+        st.download_button(label="📥 ดาวน์โหลดข้อมูลทั้งหมดเป็น (.CSV)", data=csv_data.encode('utf-8-sig'), file_name='rail_damage_report.csv', mime='text/csv')
         
-        return jsonify({'error': 'Not found'}), 404
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/records/<record_id>', methods=['DELETE'])
-def delete_record(record_id):
-    """Delete damage report"""
-    try:
-        records = load_records()
-        records = [r for r in records if r['id'] != record_id]
-        save_records(records)
-        return jsonify({'success': True})
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/statistics', methods=['GET'])
-def get_statistics():
-    """Get statistics for dashboard"""
-    records = load_records()
-    
-    stats = {
-        'total': len(records),
-        'high': len([r for r in records if r.get('severity') == 'high']),
-        'pending': len([r for r in records if r.get('status') == 'pending']),
-        'resolved': len([r for r in records if r.get('status') == 'done']),
-        'severityBreakdown': {},
-        'statusBreakdown': {},
-        'typeBreakdown': {},
-        'lineBreakdown': {},
-        'hotAreas': {}
-    }
-    
-    # Severity breakdown
-    for sev in ['low', 'med', 'high']:
-        count = len([r for r in records if r.get('severity') == sev])
-        stats['severityBreakdown'][SEVERITY_MAP.get(sev, sev)] = count
-    
-    # Status breakdown
-    for status in ['pending', 'inprog', 'done']:
-        count = len([r for r in records if r.get('status') == status])
-        stats['statusBreakdown'][STATUS_MAP.get(status, status)] = count
-    
-    # Type breakdown
-    for record in records:
-        dtype = record.get('type', 'Unknown')
-        stats['typeBreakdown'][dtype] = stats['typeBreakdown'].get(dtype, 0) + 1
-    
-    # Line breakdown
-    for record in records:
-        line = record.get('line', 'Unknown')
-        stats['lineBreakdown'][line] = stats['lineBreakdown'].get(line, 0) + 1
-    
-    # Hot areas (locations with most reports)
-    for record in records:
-        key = f"{record.get('line', '')} - {record.get('station', '')}"
-        stats['hotAreas'][key] = stats['hotAreas'].get(key, 0) + 1
-    
-    return jsonify(stats)
-
-
-@app.route('/api/export/csv', methods=['GET'])
-def export_csv():
-    """Export records as CSV"""
-    import csv
-    from io import StringIO
-    
-    records = load_records()
-    
-    output = StringIO()
-    writer = csv.writer(output, lineterminator='\n')
-    
-    # Header
-    headers = ['รหัส', 'วันที่', 'เวลา', 'สาย', 'สถานี', 'ประเภท', 'ความรุนแรง', 'สถานะ', 'ผู้รายงาน']
-    writer.writerow(headers)
-    
-    # Data
-    for record in records:
-        writer.writerow([
-            record.get('id'),
-            record.get('date'),
-            record.get('time'),
-            record.get('line'),
-            record.get('station'),
-            record.get('type'),
-            SEVERITY_MAP.get(record.get('severity'), ''),
-            STATUS_MAP.get(record.get('status'), ''),
-            record.get('reporter')
-        ])
-    
-    return output.getvalue(), 200, {
-        'Content-Disposition': 'attachment; filename=rail_damage_report.csv',
-        'Content-type': 'text/csv; charset=utf-8'
-    }
-
-
-@app.route('/api/departments', methods=['GET'])
-def get_departments():
-    """Get list of departments"""
-    return jsonify(DEPARTMENTS)
-
-
-@app.errorhandler(404)
-def not_found(error):
-    """Handle 404 errors"""
-    return jsonify({'error': 'Not found'}), 404
-
-
-@app.errorhandler(500)
-def server_error(error):
-    """Handle 500 errors"""
-    return jsonify({'error': 'Server error'}), 500
-
-# เพิ่มคำสั่งรันเซิร์ฟเวอร์
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+        st.markdown("---")
+        
+        # วนลูปแสดงรายงานแต่ละชิ้นด้วย Expander (กล่องพับเก็บได้)
+        for idx, r in enumerate(records):
+            severity_label = SEVERITY_MAP.get(r.get('severity'), 'ไม่ระบุ')
+            status_label = STATUS_MAP.get(r.get('status'), 'รอดำเนินการ')
+            
+            expander_title = f"📋 [{r.get('id')}] สาย: {r.get('line')} | ประเภท: {r.get('type')} | ความรุนแรง: {severity_label} | สถานะ: {status_label}"
+            
+            with st.expander(expander_title):
+                col_d1, col_d2 = st.columns(2)
+                with col_d1:
+                    st.write(f"**📅 วันที่-เวลา:** {r.get('date')} {r.get('time')}")
+                    st.write(f"**📍 สถานที่:** สาย {r.get('line')} สถานี {r.get('station')} (KM ที่ {r.get('km')})")
+                    st.write(f"**🛠️ หมายเลขราง:** {r.get('railId')} | **ความยาวชำรุด:** {r.get('length')}")
+                    st.write(f"**📝 รายละเอียด:** {r.get('detail')}")
+                    st.write(f"**💡 การแก้ไขเบื้องต้น:** {r.get('action')}")
+                with col_d2:
+                    st.write(f"**👤 ผู้รายงาน:** {r.get('reporter')} ({r.get('position')})")
+                    st.write(f"**🏢 หน่วยงาน:** {r.get('dept')} | **📞 โทร:** {r.get('phone')}")
+                    st.write(f"**⏱️ สร้างเมื่อ:** {r.get('createdAt')}")
+                    
+                    st.markdown("---")
+                    # ฟังก์ชันการอัปเดตสถานะและการลบ (แทนที่ PUT และ DELETE API)
+                    new_status = st.selectbox(f"เปลี่ยนสถานะงาน ({r.get('id')})", options=list(STATUS_MAP.keys()), index=list(STATUS_MAP.keys()).index(r.get('status', 'pending')), key=f"status_{r.get('id')}")
+                    
+                    col_b1, col_b2 = st.columns(2)
+                    if col_b1.button("🔄 อัปเดตสถานะ", key=f"update_{r.get('id')}"):
+                        records[idx]['status'] = new_status
+                        records[idx]['updatedAt'] = datetime.now().isoformat()
+                        save_records(records)
+                        st.success("อัปเดตสถานะเรียบร้อยแล้ว!")
+                        st.rerun()
+                        
+                    if col_b2.button("🗑️ ลบรายงานนี้", key=f"delete_{r.get('id')}"):
+                        records.pop(idx)
+                        save_records(records)
+                        st.warning("ลบรายการเรียบร้อยแล้ว!")
+                        st.rerun()
+    else:
+        st.info("ยังไม่มีข้อมูลรายงานรางชำรุดในระบบ ณ ขณะนี้")
