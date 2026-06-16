@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 
 # ----------------- 1. Page Config -----------------
 st.set_page_config(
-    page_title="ระบบรายงานรางชำรุดหักแตกร้าว",
+    page_title="ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)",
     page_icon="🛤️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -26,7 +26,7 @@ st.set_page_config(
 # ----------------- 2. Custom CSS -----------------
 st.markdown("""
 <style>
-    @import url('[fonts.googleapis.com](https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap)');
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap');
 
     html, body, [class*="css"] {
         font-family: 'Sarabun', sans-serif !important;
@@ -158,16 +158,30 @@ st.markdown("""
         margin-top: 8px;
         opacity: 0.9;
     }
+    .sidebar-credit {
+        font-size: 12px;
+        line-height: 1.6;
+        opacity: 0.72;
+        text-align: center;
+        margin-top: 12px;
+    }
+    .required-note {
+        color: #64748b;
+        font-size: 13px;
+        margin-top: -4px;
+        margin-bottom: 14px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ----------------- 3. Data / Constants -----------------
-DATA_FILE = 'data/rail_damage_records.json'
-Path('data').mkdir(exist_ok=True)
+APP_DIR = Path(__file__).resolve().parent
+DATA_FILE = APP_DIR / 'data' / 'rail_damage_records.json'
+DATA_FILE.parent.mkdir(exist_ok=True)
 
 def load_records():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+    if DATA_FILE.exists():
+        with DATA_FILE.open('r', encoding='utf-8') as f:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
@@ -175,13 +189,22 @@ def load_records():
     return []
 
 def save_records(records):
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+    DATA_FILE.parent.mkdir(exist_ok=True)
+    with DATA_FILE.open('w', encoding='utf-8') as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
 
 def generate_id():
     recs = load_records()
     year = datetime.now().year
-    num  = len(recs) + 1
+    existing_nums = []
+    for rec in recs:
+        parts = str(rec.get('id', '')).split('-')
+        if len(parts) >= 3 and parts[0] == 'RPT' and parts[1] == str(year):
+            try:
+                existing_nums.append(int(parts[2]))
+            except ValueError:
+                pass
+    num = (max(existing_nums) + 1) if existing_nums else 1
     suffix = ''.join([chr(random.randint(65, 90)) for _ in range(3)])
     return f'RPT-{year}-{num:04d}-{suffix}'
 
@@ -401,7 +424,7 @@ records = load_records()
 with st.sidebar:
     st.markdown("""
     <div class="sidebar-logo">
-        <img src="[upload.wikimedia.org](https://upload.wikimedia.org/wikipedia/th/thumb/d/d5/State_Railway_of_Thailand_Logo.svg/1200px-State_Railway_of_Thailand_Logo.svg.png)"
+        <img src="https://upload.wikimedia.org/wikipedia/th/thumb/d/d5/State_Railway_of_Thailand_Logo.svg/1200px-State_Railway_of_Thailand_Logo.svg.png"
              width="72" style="filter: brightness(0) invert(1);">
         <div class="sidebar-brand">การรถไฟแห่งประเทศไทย</div>
     </div>
@@ -415,8 +438,12 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"""
     <div style='font-size:12px; opacity:0.6; text-align:center;'>
-        เวอร์ชัน 2.1.0<br>
+        เวอร์ชัน 2.2.0<br>
         อัปเดต: {datetime.now().strftime('%d/%m/%Y')}
+        <div class="sidebar-credit">
+            จัดทำโดย<br>
+            กองทางถาวร และกองเทคนิคทางถาวร
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -425,8 +452,8 @@ st.markdown("""
 <div class="topbar-header">
     <div class="topbar-icon">🛤️</div>
     <div>
-        <div class="topbar-title">ระบบรายงานรางชำรุดหักแตกร้าว</div>
-        <div class="topbar-sub">Rail Damage Reporting System · การรถไฟแห่งประเทศไทย (SRT)</div>
+        <div class="topbar-title">ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)</div>
+        <div class="topbar-sub">Rail Damage Reporting System · จัดทำโดย กองทางถาวร และกองเทคนิคทางถาวร</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -436,8 +463,12 @@ st.markdown("""
 # หน้า 1: แจ้งความเสียหาย
 # ================================================================
 if menu == "📝 แจ้งความเสียหาย":
-    st.markdown('<div class="section-header"><h4>📝 ส่งรายงานรางชำรุดใหม่</h4></div>',
+    st.markdown('<div class="section-header"><h4>📝 ส่งรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)</h4></div>',
                 unsafe_allow_html=True)
+    st.markdown(
+        '<div class="required-note">กรอกข้อมูลเท่าที่ทราบในขณะพบเหตุ โดยช่องที่มีเครื่องหมาย * เป็นข้อมูลจำเป็น</div>',
+        unsafe_allow_html=True
+    )
 
     with st.form("new_report_form", clear_on_submit=True):
 
@@ -511,8 +542,10 @@ if menu == "📝 แจ้งความเสียหาย":
         with c16:
             phone_input    = st.text_input("📞 เบอร์โทรศัพท์", placeholder="เช่น 081-234-5678")
 
-        dept_input = st.selectbox("🏢 หน่วยงาน/แขวง *",
-                                   options=["-- เลือกหน่วยงาน --"] + DEPARTMENTS)
+        dept_input = st.text_input(
+            "🏢 หน่วยงาน/เขต *",
+            placeholder="เช่น กองทางถาวร / แขวงบำรุงทาง / ตอนนายตรวจทาง / เขตพื้นที่"
+        )
 
         st.markdown("<br>", unsafe_allow_html=True)
         submit_btn = st.form_submit_button("💾 บันทึกและส่งรายงาน", use_container_width=True)
@@ -522,7 +555,7 @@ if menu == "📝 แจ้งความเสียหาย":
             if line_input  == "-- เลือกสายทาง --":   errors.append("สายทาง")
             if type_input  == "-- เลือกประเภท --":   errors.append("ประเภทความชำรุด")
             if not reporter_input.strip():             errors.append("ชื่อ-นามสกุลผู้รายงาน")
-            if dept_input  == "-- เลือกหน่วยงาน --": errors.append("หน่วยงาน")
+            if not dept_input.strip():                errors.append("หน่วยงาน/เขต")
 
             if errors:
                 st.error(f"⚠️ กรุณากรอก/เลือก: {', '.join(errors)}")
@@ -556,7 +589,7 @@ if menu == "📝 แจ้งความเสียหาย":
                     'lon':       lon,
                     'reporter':  reporter_input,
                     'position':  position_input,
-                    'dept':      dept_input,
+                    'dept':      dept_input.strip(),
                     'phone':     phone_input,
                     'status':    'pending',
                     'createdAt': datetime.now().isoformat()
@@ -687,7 +720,7 @@ elif menu == "📊 แดชบอร์ดสถิติ":
         st.info("📭 ยังไม่มีข้อมูล กรุณาแจ้งความเสียหายก่อน")
     else:
         # =====================================================
-        # แผนที่ — ใช้ Plotly scatter_map (ไม่ต้อง folium)
+        # แผนที่ — รองรับทั้ง Plotly รุ่นใหม่และรุ่นเก่า
         # =====================================================
         st.markdown('<div class="section-header"><h4>🗺️ แผนที่จุดเกิดเหตุ</h4></div>',
                     unsafe_allow_html=True)
@@ -712,9 +745,10 @@ elif menu == "📊 แดชบอร์ดสถิติ":
                 'ขนาด':     {'high': 18, 'med': 14, 'low': 10}.get(r.get('severity'), 12),
             } for r in map_records])
 
-            fig_map = px.scatter_map(
-                map_df,
-                lat='lat', lon='lon',
+            map_kwargs = dict(
+                data_frame=map_df,
+                lat='lat',
+                lon='lon',
                 color='ประเภท',
                 size='ขนาด',
                 size_max=20,
@@ -727,9 +761,12 @@ elif menu == "📊 แดชบอร์ดสถิติ":
                 },
                 zoom=5,
                 center={"lat": 13.5, "lon": 101.0},
-                map_style="carto-positron",
                 height=520,
             )
+            if hasattr(px, "scatter_map"):
+                fig_map = px.scatter_map(**map_kwargs, map_style="carto-positron")
+            else:
+                fig_map = px.scatter_mapbox(**map_kwargs, mapbox_style="carto-positron")
             fig_map.update_layout(
                 margin=dict(l=0, r=0, t=0, b=0),
                 font=dict(family='Sarabun', size=13),
