@@ -1,1422 +1,278 @@
-<!DOCTYPE html>
-<html lang="th">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ระบบรายงานรางชำรุดหักแตกร้าว</title>
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<style>
-  :root {
-    --primary: #1a3a6b;
-    --primary-mid: #1e4d9e;
-    --primary-light: #e8f0fb;
-    --primary-glow: rgba(30,77,158,0.15);
-    --accent: #e63946;
-    --accent-light: #fff0f1;
-    --gold: #f4a234;
-    --gold-light: #fff8ec;
-    --emerald: #0f8a5f;
-    --emerald-light: #e6f7f2;
-    --sky: #0284c7;
-    --sky-light: #e0f2fe;
-    --gray-50: #f8fafc;
-    --gray-100: #f1f5f9;
-    --gray-200: #e2e8f0;
-    --gray-300: #cbd5e1;
-    --gray-400: #94a3b8;
-    --gray-500: #64748b;
-    --gray-600: #475569;
-    --gray-700: #334155;
-    --gray-800: #1e293b;
-    --gray-900: #0f172a;
-    --border: #e2e8f0;
-    --radius: 10px;
-    --radius-lg: 16px;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-    --shadow: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04);
-    --shadow-lg: 0 10px 30px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.06);
-    --sidebar-w: 230px;
-  }
+"""
+Rail Damage Reporting System - Flask Application
+ระบบรายงานรางชำรุดหักแตกร้าว
+"""
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+from flask import Flask, render_template, request, jsonify
+from datetime import datetime
+import json
+import os
+from pathlib import Path
 
-  body {
-    font-family: 'Sarabun', 'Segoe UI', sans-serif;
-    background: #f0f4f8;
-    color: var(--gray-800);
-    font-size: 15px;
-    line-height: 1.6;
-  }
+app = Flask(__name__)
+app.config['JSON_THAI_ENABLED'] = True
 
-  /* ===== TOPBAR ===== */
-  .topbar {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-mid) 100%);
-    color: #fff;
-    padding: 0 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 64px;
-    box-shadow: 0 2px 12px rgba(26,58,107,0.35);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-  .topbar-brand { display: flex; align-items: center; gap: 14px; }
-  .topbar-icon {
-    width: 40px; height: 40px;
-    background: rgba(255,255,255,0.15);
-    border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px;
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.2);
-  }
-  .topbar-title { font-size: 17px; font-weight: 700; letter-spacing: 0.01em; }
-  .topbar-sub { font-size: 11px; opacity: 0.7; letter-spacing: 0.03em; text-transform: uppercase; }
-  .topbar-right { display: flex; align-items: center; gap: 16px; }
-  .topbar-date {
-    font-size: 13px; opacity: 0.85;
-    background: rgba(255,255,255,0.1);
-    padding: 6px 14px; border-radius: 20px;
-    border: 1px solid rgba(255,255,255,0.15);
-  }
+# Database file
+DATA_FILE = 'data/rail_damage_records.json'
+Path('data').mkdir(exist_ok=True)
 
-  /* ===== LAYOUT ===== */
-  .layout { display: flex; min-height: calc(100vh - 64px); }
 
-  .sidebar {
-    width: var(--sidebar-w);
-    background: #fff;
-    border-right: 1px solid var(--border);
-    padding: 20px 0;
-    flex-shrink: 0;
-    display: flex; flex-direction: column;
-  }
-  .sidebar-section {
-    padding: 8px 20px 4px;
-    font-size: 10px; font-weight: 700;
-    color: var(--gray-400);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-top: 8px;
-  }
-  .nav-item {
-    display: flex; align-items: center; gap: 11px;
-    padding: 11px 20px;
-    cursor: pointer;
-    color: var(--gray-600);
-    font-size: 14px;
-    border-left: 3px solid transparent;
-    transition: all 0.18s;
-    border-radius: 0;
-    user-select: none;
-  }
-  .nav-item:hover { background: var(--gray-50); color: var(--primary-mid); }
-  .nav-item.active {
-    background: var(--primary-light);
-    color: var(--primary);
-    border-left-color: var(--primary-mid);
-    font-weight: 600;
-  }
-  .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
-  .sidebar-footer {
-    margin-top: auto;
-    padding: 16px 20px;
-    border-top: 1px solid var(--border);
-  }
-  .sidebar-version { font-size: 11px; color: var(--gray-400); text-align: center; }
+def load_records():
+    """Load all records from JSON file"""
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
 
-  .main { flex: 1; padding: 28px; overflow-y: auto; min-width: 0; }
 
-  /* ===== SECTIONS ===== */
-  .section { display: none; animation: fadeIn 0.2s ease; }
-  .section.active { display: block; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+def save_records(records):
+    """Save records to JSON file"""
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
 
-  .page-title {
-    font-size: 22px; font-weight: 800;
-    color: var(--gray-900);
-    margin-bottom: 24px;
-    display: flex; align-items: center; gap: 12px;
-    letter-spacing: -0.01em;
-  }
-  .page-title-icon {
-    width: 44px; height: 44px;
-    background: var(--primary-light);
-    border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px;
-    flex-shrink: 0;
-  }
-  .page-subtitle { font-size: 14px; color: var(--gray-400); font-weight: 400; margin-top: 2px; }
 
-  /* ===== METRIC CARDS ===== */
-  .metrics-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
-  }
-  .metric-card {
-    background: #fff;
-    border-radius: var(--radius-lg);
-    padding: 20px 22px;
-    box-shadow: var(--shadow);
-    position: relative;
-    overflow: hidden;
-    transition: transform 0.2s, box-shadow 0.2s;
-  }
-  .metric-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-  .metric-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 4px;
-  }
-  .metric-card.blue::before { background: linear-gradient(90deg, var(--primary), var(--primary-mid)); }
-  .metric-card.red::before { background: linear-gradient(90deg, #c0392b, var(--accent)); }
-  .metric-card.amber::before { background: linear-gradient(90deg, #d97706, var(--gold)); }
-  .metric-card.green::before { background: linear-gradient(90deg, var(--emerald), #22c55e); }
-  .metric-bg-icon {
-    position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
-    font-size: 42px; opacity: 0.07;
-    pointer-events: none;
-  }
-  .metric-label { font-size: 11px; color: var(--gray-400); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
-  .metric-value { font-size: 32px; font-weight: 800; line-height: 1.1; margin: 4px 0 2px; }
-  .metric-card.blue .metric-value { color: var(--primary); }
-  .metric-card.red .metric-value { color: #c0392b; }
-  .metric-card.amber .metric-value { color: #b45309; }
-  .metric-card.green .metric-value { color: var(--emerald); }
-  .metric-sub { font-size: 12px; color: var(--gray-400); }
+def generate_id():
+    """Generate unique report ID"""
+    records = load_records()
+    year = datetime.now().year
+    num = len(records) + 1
+    import random
+    suffix = ''.join([chr(random.randint(65, 90)) for _ in range(3)])
+    return f'RPT-{year}-{num:04d}-{suffix}'
 
-  /* ===== CARDS ===== */
-  .card {
-    background: #fff;
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow);
-    padding: 24px;
-    margin-bottom: 20px;
-  }
-  .card-title {
-    font-size: 15px; font-weight: 700;
-    color: var(--gray-800);
-    margin-bottom: 20px;
-    padding-bottom: 14px;
-    border-bottom: 2px solid var(--gray-100);
-    display: flex; align-items: center; gap: 10px;
-  }
-  .card-title-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--primary-mid);
-    flex-shrink: 0;
-  }
 
-  /* ===== FORM ===== */
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  .form-group { display: flex; flex-direction: column; gap: 6px; }
-  .form-group.full { grid-column: 1 / -1; }
-  label {
-    font-size: 13px; font-weight: 600;
-    color: var(--gray-600);
-    display: flex; align-items: center; gap: 4px;
-  }
-  label .req { color: var(--accent); }
-  input[type=text], input[type=date], input[type=time], input[type=number], select, textarea {
-    width: 100%;
-    padding: 10px 13px;
-    border: 1.5px solid var(--border);
-    border-radius: 8px;
-    font-size: 14px;
-    font-family: inherit;
-    background: var(--gray-50);
-    color: var(--gray-800);
-    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-  }
-  input:focus, select:focus, textarea:focus {
-    outline: none;
-    border-color: var(--primary-mid);
-    box-shadow: 0 0 0 3px var(--primary-glow);
-    background: #fff;
-  }
-  input.error, select.error {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(230,57,70,0.1);
-  }
-  textarea { resize: vertical; min-height: 84px; line-height: 1.6; }
-  .field-error { font-size: 12px; color: var(--accent); display: none; }
+DEPARTMENTS = [
+    "ศูนย์อาคารและสถานที่",
+    "กองบำรุงอาคารสถานที่เขตกรุงเทพ",
+    "พสถ.กรุงเทพ",
+    "พสถ.เชียงใหม่",
+    "พสถ.ขอนแก่น",
+    "พสถ.นครราชสีมา",
+    "พสถ.อุดรธานี",
+    "พสถ.นครสวรรค์",
+    "พสถ.สมุทรปราการ",
+    "พสถ.ชลบุรี"
+]
 
-  /* ===== SEVERITY ===== */
-  .sev-group { display: flex; gap: 10px; }
-  .sev-btn {
-    flex: 1; padding: 11px 10px;
-    border: 2px solid var(--border);
-    border-radius: 10px;
-    background: var(--gray-50);
-    cursor: pointer;
-    font-size: 13px; font-family: inherit; font-weight: 600;
-    color: var(--gray-400);
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    transition: all 0.15s;
-  }
-  .sev-btn:hover { border-color: var(--gray-300); background: #fff; }
-  .sev-btn.low.active { border-color: #16a34a; background: #dcfce7; color: #166534; }
-  .sev-btn.med.active { border-color: #d97706; background: #fef3c7; color: #92400e; }
-  .sev-btn.high.active { border-color: var(--accent); background: var(--accent-light); color: #991b1b; }
-  .sev-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .sev-dot.low { background: #16a34a; }
-  .sev-dot.med { background: #d97706; }
-  .sev-dot.high { background: var(--accent); }
-
-  /* ===== BUTTONS ===== */
-  .btn {
-    padding: 10px 20px; border-radius: 8px;
-    font-size: 14px; font-family: inherit; font-weight: 600;
-    cursor: pointer; border: none;
-    display: inline-flex; align-items: center; gap: 8px;
-    transition: all 0.15s;
-    text-decoration: none;
-  }
-  .btn svg { width: 16px; height: 16px; }
-  .btn-primary {
-    background: linear-gradient(135deg, var(--primary-mid), var(--primary));
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(30,77,158,0.3);
-  }
-  .btn-primary:hover { box-shadow: 0 4px 14px rgba(30,77,158,0.4); transform: translateY(-1px); }
-  .btn-secondary { background: #fff; color: var(--gray-600); border: 1.5px solid var(--border); }
-  .btn-secondary:hover { background: var(--gray-50); border-color: var(--gray-300); }
-  .btn-danger { background: var(--accent-light); color: var(--accent); border: 1.5px solid #fca5a5; }
-  .btn-danger:hover { background: #fee2e2; }
-  .btn-success { background: var(--emerald-light); color: var(--emerald); border: 1.5px solid #6ee7b7; }
-  .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
-  .btn-row { display: flex; gap: 10px; margin-top: 22px; }
-
-  /* ===== ALERT ===== */
-  .alert {
-    padding: 13px 18px; border-radius: 10px;
-    font-size: 14px; font-weight: 500;
-    margin-bottom: 16px;
-    display: none;
-    align-items: center; gap: 10px;
-    animation: slideDown 0.3s ease;
-  }
-  @keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
-  .alert.success { background: var(--emerald-light); color: #065f46; border: 1px solid #6ee7b7; }
-  .alert.error { background: var(--accent-light); color: #991b1b; border: 1px solid #fca5a5; }
-  .alert.show { display: flex; }
-
-  /* ===== BADGES ===== */
-  .badge {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 4px 10px; border-radius: 20px;
-    font-size: 12px; font-weight: 600;
-  }
-  .badge-dot { width: 6px; height: 6px; border-radius: 50%; }
-  .badge.low { background: #dcfce7; color: #166534; }
-  .badge.low .badge-dot { background: #16a34a; }
-  .badge.med { background: #fef3c7; color: #92400e; }
-  .badge.med .badge-dot { background: #d97706; }
-  .badge.high { background: #fee2e2; color: #991b1b; }
-  .badge.high .badge-dot { background: var(--accent); }
-  .badge.pending { background: #dbeafe; color: #1e40af; }
-  .badge.inprog { background: #fef3c7; color: #92400e; }
-  .badge.done { background: #dcfce7; color: #166534; }
-
-  /* ===== TABLE ===== */
-  .filter-bar {
-    display: flex; gap: 10px; margin-bottom: 16px;
-    flex-wrap: wrap; align-items: center;
-  }
-  .filter-bar select { max-width: 200px; }
-  .filter-bar input[type=text] { max-width: 250px; }
-  .record-count { font-size: 13px; color: var(--gray-400); margin-left: auto; }
-
-  .records-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .records-table th {
-    background: var(--gray-50);
-    padding: 11px 14px;
-    text-align: left;
-    font-size: 11px; font-weight: 700;
-    color: var(--gray-400);
-    text-transform: uppercase; letter-spacing: 0.06em;
-    border-bottom: 2px solid var(--gray-200);
-    white-space: nowrap;
-  }
-  .records-table td { padding: 12px 14px; border-bottom: 1px solid var(--gray-100); vertical-align: middle; }
-  .records-table tr:last-child td { border-bottom: none; }
-  .records-table tr:hover td { background: var(--primary-light); }
-  .record-id { font-family: monospace; font-size: 11px; color: var(--gray-400); }
-  .record-loc { font-weight: 600; font-size: 14px; }
-  .record-sub { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
-  .action-btns { display: flex; gap: 6px; }
-  .empty-state { text-align: center; padding: 56px 24px; color: var(--gray-400); }
-  .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
-  .empty-state p { font-size: 14px; }
-
-  /* ===== CHARTS ===== */
-  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-  .chart-card { background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 22px; }
-  .chart-title { font-size: 14px; font-weight: 700; color: var(--gray-700); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-  .chart-wrap { position: relative; }
-  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gray-600); }
-  .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-
-  /* ===== MAP ===== */
-  #map-container {
-    width: 100%; height: 420px;
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    background: #e8ecf0;
-    display: flex; align-items: center; justify-content: center;
-    position: relative;
-  }
-  #leaflet-map { width: 100%; height: 100%; }
-  .map-legend {
-    display: flex; gap: 16px;
-    flex-wrap: wrap;
-    margin-top: 12px;
-    font-size: 12px;
-  }
-  .map-legend-item { display: flex; align-items: center; gap: 6px; color: var(--gray-600); }
-  .map-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.2); }
-
-  /* ===== HOT AREA TABLE ===== */
-  .hotarea-table { width: 100%; border-collapse: collapse; }
-  .hotarea-table th { font-size: 12px; font-weight: 700; color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 2px solid var(--gray-100); text-align: left; }
-  .hotarea-table td { padding: 10px 12px; border-bottom: 1px solid var(--gray-100); font-size: 13px; }
-  .hotarea-bar { display: flex; align-items: center; gap: 8px; }
-  .hotarea-bar-track { flex: 1; height: 6px; background: var(--gray-100); border-radius: 4px; overflow: hidden; }
-  .hotarea-bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--primary-mid), var(--sky)); transition: width 0.6s ease; }
-
-  /* ===== IMAGE UPLOAD ===== */
-  .img-upload-zone {
-    border: 2px dashed var(--border);
-    border-radius: 12px;
-    padding: 24px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    background: var(--gray-50);
-  }
-  .img-upload-zone:hover, .img-upload-zone.drag-over {
-    border-color: var(--primary-mid);
-    background: var(--primary-light);
-  }
-  .img-upload-icon { font-size: 32px; margin-bottom: 8px; }
-  .img-upload-text { font-size: 13px; color: var(--gray-500); }
-  .img-upload-text strong { color: var(--primary-mid); }
-  .img-previews { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-  .img-preview-item {
-    position: relative;
-    width: 90px; height: 90px;
-    border-radius: 10px;
-    overflow: hidden;
-    border: 2px solid var(--border);
-    box-shadow: var(--shadow-sm);
-  }
-  .img-preview-item img { width: 100%; height: 100%; object-fit: cover; }
-  .img-preview-del {
-    position: absolute; top: 4px; right: 4px;
-    width: 22px; height: 22px;
-    background: rgba(0,0,0,0.65);
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    color: #fff;
-    font-size: 12px;
-    line-height: 1;
-    transition: background 0.15s;
-    border: none;
-  }
-  .img-preview-del:hover { background: var(--accent); }
-  #f-images-input { display: none; }
-
-  /* ===== MODAL ===== */
-  .modal-overlay {
-    position: fixed; inset: 0;
-    background: rgba(15,23,42,0.5);
-    display: none; align-items: center; justify-content: center;
-    z-index: 200;
-    backdrop-filter: blur(4px);
-  }
-  .modal-overlay.show { display: flex; }
-  .modal {
-    background: #fff; border-radius: 16px;
-    padding: 28px; max-width: 480px; width: 90%;
-    box-shadow: 0 25px 60px rgba(0,0,0,0.2);
-    animation: popIn 0.2s ease;
-  }
-  @keyframes popIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
-  .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
-  .modal-body { font-size: 14px; color: var(--gray-600); margin-bottom: 24px; line-height: 1.7; }
-  .modal-footer { display: flex; gap: 10px; justify-content: flex-end; }
-
-  /* ===== PHOTO VIEWER MODAL ===== */
-  #photo-modal .modal { max-width: 700px; }
-  .photo-gallery { display: flex; gap: 10px; flex-wrap: wrap; }
-  .photo-gallery img {
-    height: 180px; border-radius: 10px;
-    cursor: pointer; object-fit: cover;
-    border: 2px solid var(--border);
-    transition: transform 0.15s, border-color 0.15s;
-  }
-  .photo-gallery img:hover { transform: scale(1.03); border-color: var(--primary-mid); }
-
-  /* ===== SCROLLBAR ===== */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
-
-  /* ===== PRINT ===== */
-  @media print {
-    .sidebar, .topbar, .filter-bar, .btn-row, .action-btns, .alert { display: none !important; }
-    .main { padding: 0; }
-    body { background: #fff; }
-    .section { display: block !important; }
-  }
-
-  /* ===== AUTOCOMPLETE ===== */
-  .autocomplete-wrap { position: relative; }
-  .autocomplete-list {
-    position: absolute; top: 100%; left: 0; right: 0;
-    background: #fff;
-    border: 1.5px solid var(--primary-mid);
-    border-top: none;
-    border-radius: 0 0 8px 8px;
-    max-height: 220px; overflow-y: auto;
-    z-index: 50;
-    box-shadow: var(--shadow-lg);
-    display: none;
-  }
-  .autocomplete-list.open { display: block; }
-  .autocomplete-item {
-    padding: 9px 13px;
-    font-size: 13px;
-    cursor: pointer;
-    color: var(--gray-700);
-    border-bottom: 1px solid var(--gray-100);
-    transition: background 0.1s;
-  }
-  .autocomplete-item:last-child { border-bottom: none; }
-  .autocomplete-item:hover, .autocomplete-item.active { background: var(--primary-light); color: var(--primary); }
-  .autocomplete-item mark { background: none; color: var(--primary-mid); font-weight: 700; }
-</style>
-</head>
-<body>
-
-<!-- TOP BAR -->
-<div class="topbar">
-  <div class="topbar-brand">
-    <div class="topbar-icon">🛤️</div>
-    <div>
-      <div class="topbar-title">ระบบรายงานรางชำรุดหักแตกร้าว</div>
-      <div class="topbar-sub">Rail Damage Reporting System · การรถไฟแห่งประเทศไทย</div>
-    </div>
-  </div>
-  <div class="topbar-right">
-    <div class="topbar-date" id="topbar-date"></div>
-  </div>
-</div>
-
-<div class="layout">
-
-  <!-- SIDEBAR -->
-  <nav class="sidebar">
-    <div class="sidebar-section">เมนูหลัก</div>
-    <div class="nav-item active" onclick="switchTab('report')">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-      แจ้งความเสียหาย
-    </div>
-    <div class="nav-item" onclick="switchTab('list')">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-      รายการทั้งหมด
-    </div>
-    <div class="nav-item" onclick="switchTab('dashboard')">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-      สรุปภาพรวม
-    </div>
-    <div class="sidebar-section">การส่งออก</div>
-    <div class="nav-item" onclick="exportCSV()">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-      ส่งออก CSV
-    </div>
-    <div class="nav-item" onclick="window.print()">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-      พิมพ์รายงาน
-    </div>
-    <div class="sidebar-footer">
-      <div class="sidebar-version">v2.0 · 2026</div>
-    </div>
-  </nav>
-
-  <!-- MAIN CONTENT -->
-  <main class="main">
-
-    <!-- SECTION: REPORT FORM -->
-    <div id="sec-report" class="section active">
-      <div class="page-title">
-        <div class="page-title-icon">📋</div>
-        <div>
-          แจ้งความเสียหายรางชำรุด
-          <div class="page-subtitle">กรอกข้อมูลความเสียหายที่ตรวจพบ</div>
-        </div>
-      </div>
-
-      <div id="form-alert" class="alert"></div>
-
-      <!-- ข้อมูลเบื้องต้น -->
-      <div class="card">
-        <div class="card-title"><div class="card-title-dot"></div>ข้อมูลเบื้องต้น</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label>วันที่พบความเสียหาย <span class="req">*</span></label>
-            <input type="date" id="f-date">
-            <div class="field-error" id="err-date">กรุณาระบุวันที่</div>
-          </div>
-          <div class="form-group">
-            <label>เวลาที่พบ</label>
-            <input type="time" id="f-time">
-          </div>
-          <div class="form-group">
-            <label>สาย / เส้นทาง <span class="req">*</span></label>
-            <input type="text" id="f-line" placeholder="เช่น สาย 1, สายสีแดง, สายเหนือ">
-            <div class="field-error" id="err-line">กรุณาระบุสาย/เส้นทาง</div>
-          </div>
-          <div class="form-group">
-            <label>สถานีที่ใกล้ที่สุด</label>
-            <input type="text" id="f-station" placeholder="เช่น สถานีกลางกรุงเทพอภิวัฒน์">
-          </div>
-          <div class="form-group">
-            <label>ตำแหน่ง กม. (KM)</label>
-            <input type="number" id="f-km" placeholder="12.500" step="0.001">
-          </div>
-          <div class="form-group">
-            <label>รหัสราง / หมายเลขราง</label>
-            <input type="text" id="f-railid" placeholder="เช่น R-2701">
-          </div>
-          <div class="form-group">
-            <label>Latitude (ละติจูด)</label>
-            <input type="number" id="f-lat" placeholder="13.7563" step="0.000001">
-          </div>
-          <div class="form-group">
-            <label>Longitude (ลองจิจูด)</label>
-            <input type="number" id="f-lng" placeholder="100.5018" step="0.000001">
-          </div>
-        </div>
-      </div>
-
-      <!-- รายละเอียดความเสียหาย -->
-      <div class="card">
-        <div class="card-title"><div class="card-title-dot"></div>รายละเอียดความเสียหาย</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label>ประเภทความเสียหาย <span class="req">*</span></label>
-            <select id="f-type">
-              <option value="">-- เลือกประเภท --</option>
-              <optgroup label="ความเสียหายราง">
-                <option>รางหัก</option>
-                <option>รางแตกร้าว</option>
-                <option>รางชำรุด (สึกหรอ)</option>
-                <option>รางบิดตัว</option>
-                <option>รางทรุดตัว</option>
-              </optgroup>
-              <optgroup label="ส่วนประกอบ">
-                <option>ข้อต่อรางชำรุด</option>
-                <option>สลักรางชำรุด</option>
-                <option>หมอนรางชำรุด</option>
-                <option>พื้นรางชำรุด</option>
-                <option>ลูกปืนรางชำรุด</option>
-              </optgroup>
-              <optgroup label="อื่นๆ">
-                <option>สิ่งแปลกปลอมในราง</option>
-                <option>อื่นๆ (ระบุในรายละเอียด)</option>
-              </optgroup>
-            </select>
-            <div class="field-error" id="err-type">กรุณาเลือกประเภทความเสียหาย</div>
-          </div>
-          <div class="form-group">
-            <label>ความยาวที่เสียหาย (เมตร)</label>
-            <input type="number" id="f-length" placeholder="0.00" step="0.01" min="0">
-          </div>
-          <div class="form-group full">
-            <label>ระดับความรุนแรง <span class="req">*</span></label>
-            <div class="sev-group">
-              <button class="sev-btn low" type="button" onclick="setSev('low')">
-                <span class="sev-dot low"></span> ต่ำ — ซ่อมได้ตามแผน
-              </button>
-              <button class="sev-btn med" type="button" onclick="setSev('med')">
-                <span class="sev-dot med"></span> ปานกลาง — เฝ้าระวัง
-              </button>
-              <button class="sev-btn high" type="button" onclick="setSev('high')">
-                <span class="sev-dot high"></span> สูง — หยุดเดินรถทันที
-              </button>
-            </div>
-            <div class="field-error" id="err-sev">กรุณาเลือกระดับความรุนแรง</div>
-          </div>
-          <div class="form-group full">
-            <label>รายละเอียดความเสียหาย</label>
-            <textarea id="f-detail" placeholder="อธิบายลักษณะความเสียหายโดยละเอียด สาเหตุที่สังเกตได้ และสภาพแวดล้อมในขณะตรวจพบ..."></textarea>
-          </div>
-          <div class="form-group full">
-            <label>มาตรการเบื้องต้นที่ดำเนินการแล้ว</label>
-            <textarea id="f-action" placeholder="เช่น ติดป้ายเตือน, แจ้งผู้บังคับบัญชา, ปิดเส้นทางชั่วคราว..." style="min-height:68px"></textarea>
-          </div>
-        </div>
-      </div>
-
-      <!-- ภาพถ่ายความเสียหาย -->
-      <div class="card">
-        <div class="card-title"><div class="card-title-dot"></div>ภาพถ่ายความเสียหาย</div>
-        <div class="img-upload-zone" id="upload-zone" onclick="document.getElementById('f-images-input').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
-          <div class="img-upload-icon">📷</div>
-          <div class="img-upload-text">
-            <strong>คลิกเพื่ออัปโหลดภาพ</strong> หรือลากไฟล์มาวาง<br>
-            รองรับ JPG, PNG, WEBP — สูงสุด 10 ภาพ
-          </div>
-        </div>
-        <input type="file" id="f-images-input" accept="image/*" multiple onchange="handleImageSelect(event)">
-        <div class="img-previews" id="img-previews"></div>
-      </div>
-
-      <!-- ผู้รับผิดชอบ -->
-      <div class="card">
-        <div class="card-title"><div class="card-title-dot"></div>ผู้รับผิดชอบ</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label>ผู้รายงาน</label>
-            <input type="text" id="f-reporter" placeholder="ชื่อ-นามสกุล">
-          </div>
-          <div class="form-group">
-            <label>ตำแหน่ง</label>
-            <input type="text" id="f-position" placeholder="เช่น นายช่างโยธา">
-          </div>
-          <div class="form-group full">
-            <label>หน่วยงาน</label>
-            <div class="autocomplete-wrap">
-              <input type="text" id="f-dept" placeholder="พิมพ์ค้นหาหน่วยงาน..." autocomplete="off" oninput="filterDept(this.value)" onblur="setTimeout(closeDeptList,150)" onfocus="filterDept(this.value)">
-              <div class="autocomplete-list" id="dept-list"></div>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>เบอร์ติดต่อ</label>
-            <input type="text" id="f-phone" placeholder="02-XXX-XXXX">
-          </div>
-          <div class="form-group">
-            <label>สถานะการซ่อมแซม</label>
-            <select id="f-status">
-              <option value="pending">🔵 รอดำเนินการ</option>
-              <option value="inprog">🟡 กำลังซ่อมแซม</option>
-              <option value="done">🟢 ซ่อมแซมแล้ว</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>กำหนดซ่อมแซมเสร็จ</label>
-            <input type="date" id="f-due">
-          </div>
-          <div class="form-group full">
-            <label>หมายเหตุ</label>
-            <textarea id="f-note" placeholder="ข้อมูลเพิ่มเติม..." style="min-height:60px"></textarea>
-          </div>
-        </div>
-      </div>
-
-      <div class="btn-row">
-        <button class="btn btn-primary" onclick="submitForm()">
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-          <span id="btn-submit-text">บันทึกรายงาน</span>
-        </button>
-        <button class="btn btn-secondary" onclick="clearForm()">
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          ล้างข้อมูล
-        </button>
-      </div>
-    </div>
-
-    <!-- SECTION: LIST -->
-    <div id="sec-list" class="section">
-      <div class="page-title">
-        <div class="page-title-icon">📝</div>
-        <div>
-          รายการทั้งหมด
-          <div class="page-subtitle">รายงานความเสียหายทั้งหมดในระบบ</div>
-        </div>
-      </div>
-
-      <div class="metrics-grid" id="list-metrics"></div>
-
-      <div class="card">
-        <div class="filter-bar">
-          <input type="text" id="search-text" placeholder="🔍  ค้นหาสาย / สถานี / ประเภท..." onkeyup="renderTable()" style="width:260px">
-          <select id="filter-sev" onchange="renderTable()">
-            <option value="">ทุกระดับความรุนแรง</option>
-            <option value="high">สูง</option>
-            <option value="med">ปานกลาง</option>
-            <option value="low">ต่ำ</option>
-          </select>
-          <select id="filter-status" onchange="renderTable()">
-            <option value="">ทุกสถานะ</option>
-            <option value="pending">รอดำเนินการ</option>
-            <option value="inprog">กำลังซ่อมแซม</option>
-            <option value="done">ซ่อมแซมแล้ว</option>
-          </select>
-          <span class="record-count" id="record-count"></span>
-        </div>
-        <div style="overflow-x:auto">
-          <table class="records-table">
-            <thead>
-              <tr>
-                <th>รหัส</th>
-                <th>วันที่</th>
-                <th>สาย / สถานี</th>
-                <th>พิกัด</th>
-                <th>ประเภทความเสียหาย</th>
-                <th>ความรุนแรง</th>
-                <th>สถานะ</th>
-                <th>ผู้รายงาน</th>
-                <th>จัดการ</th>
-              </tr>
-            </thead>
-            <tbody id="table-body"></tbody>
-          </table>
-        </div>
-        <div id="empty-state" class="empty-state" style="display:none">
-          <div class="empty-icon">📭</div>
-          <p>ยังไม่มีรายการ — กดแจ้งความเสียหายเพื่อเพิ่มข้อมูล</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- SECTION: DASHBOARD -->
-    <div id="sec-dashboard" class="section">
-      <div class="page-title">
-        <div class="page-title-icon">📊</div>
-        <div>
-          สรุปภาพรวม
-          <div class="page-subtitle">สถิติและแผนที่ความเสียหายทั้งหมด</div>
-        </div>
-      </div>
-
-      <!-- Metrics -->
-      <div class="metrics-grid" id="dash-metrics"></div>
-
-      <!-- Map -->
-      <div class="card">
-        <div class="card-title"><div class="card-title-dot"></div>แผนที่จุดเกิดเหตุ</div>
-        <div id="map-container">
-          <div id="leaflet-map"></div>
-        </div>
-        <div class="map-legend">
-          <div class="map-legend-item"><div class="map-dot" style="background:#c0392b"></div> รางหัก</div>
-          <div class="map-legend-item"><div class="map-dot" style="background:#d97706"></div> รางชำรุด</div>
-          <div class="map-legend-item"><div class="map-dot" style="background:#1a56a0"></div> รางแตกร้าว</div>
-          <div class="map-legend-item"><div class="map-dot" style="background:#64748b"></div> อื่นๆ</div>
-        </div>
-      </div>
-
-      <!-- Charts row 1 -->
-      <div class="charts-grid">
-        <div class="chart-card">
-          <div class="chart-title">🎯 ระดับความรุนแรง</div>
-          <div class="chart-wrap" style="height:220px"><canvas id="chart-sev"></canvas></div>
-          <div class="legend" id="legend-sev"></div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-title">🔧 สถานะการซ่อมแซม</div>
-          <div class="chart-wrap" style="height:220px"><canvas id="chart-status"></canvas></div>
-          <div class="legend" id="legend-status"></div>
-        </div>
-      </div>
-
-      <!-- Hot areas -->
-      <div class="card">
-        <div class="card-title"><div class="card-title-dot"></div>🔥 พื้นที่เกิดเหตุบ่อย (Top 10)</div>
-        <table class="hotarea-table" id="hotarea-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>สาย / สถานี</th>
-              <th>จำนวนเหตุการณ์</th>
-              <th>สัดส่วน</th>
-            </tr>
-          </thead>
-          <tbody id="hotarea-body"></tbody>
-        </table>
-      </div>
-
-      <!-- Type chart -->
-      <div class="chart-card" style="margin-bottom:20px">
-        <div class="chart-title">🔩 ประเภทความเสียหาย</div>
-        <div class="chart-wrap" id="type-chart-wrap" style="height:260px"><canvas id="chart-type"></canvas></div>
-      </div>
-
-      <!-- Line chart -->
-      <div class="chart-card">
-        <div class="chart-title">🚉 รายงานตามสาย/เส้นทาง</div>
-        <div class="chart-wrap" id="line-chart-wrap" style="height:220px"><canvas id="chart-line"></canvas></div>
-      </div>
-    </div>
-
-  </main>
-</div>
-
-<!-- CONFIRM DELETE MODAL -->
-<div class="modal-overlay" id="confirm-modal">
-  <div class="modal">
-    <div class="modal-title">⚠️ ยืนยันการลบ</div>
-    <div class="modal-body">คุณต้องการลบรายการนี้ใช่หรือไม่?<br>การดำเนินการนี้ไม่สามารถย้อนกลับได้</div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('confirm-modal')">ยกเลิก</button>
-      <button class="btn btn-danger" id="confirm-delete-btn">🗑️ ลบรายการ</button>
-    </div>
-  </div>
-</div>
-
-<!-- PHOTO VIEWER MODAL -->
-<div class="modal-overlay" id="photo-modal">
-  <div class="modal">
-    <div class="modal-title">📷 ภาพถ่ายความเสียหาย</div>
-    <div class="photo-gallery" id="photo-gallery"></div>
-    <div class="modal-footer" style="margin-top:20px">
-      <button class="btn btn-secondary" onclick="closeModal('photo-modal')">ปิด</button>
-    </div>
-  </div>
-</div>
-
-<!-- Leaflet CSS + JS -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-
-<script>
-// ===== DEPARTMENTS =====
-const DEPTS = ["ศูนย์อาคารและสถานที่","กองบำรุงอาคารสถานที่เขตกรุงเทพ","พสถ.กรุงเทพ","พสถ.มักกะสัน","พสถ.หัวตะเข้","งานสถานที่บางซื่อ","พสถ.บางซื่อ","พสถ.ธนบุรี","พสถ.กม.๑๑","ศูนย์บำรุงทางภาคกลาง","งานเครื่องกลบำรุงทางหนักกรุงเทพ","กองบำรุงทางเขตกรุงเทพ","แขวงบำรุงทางกรุงเทพ","นตท.กรุงเทพ","นตท.มักกะสัน","นตท.หัวหมาก","นตท.ลาดกระบัง","นตท.หัวตะเข้","นตท.สมุทรสาคร","แขวงบำรุงทางบางซื่อ","นตท.บางซื่อ","นตท.กรุงเทพอภิวัฒน์","นตท.ธนบุรี","นตท.ศาลายา","นตท.ย่านพหลโยธิน","แขวงบำรุงทางนครปฐม","นตท.นครชัยศรี","นตท.นครปฐม","นตท.บ้านโป่ง","นตท.ยางประสาท","นตท.สุพรรณบุรี","พสถ.นครปฐม","กองบำรุงทางเขตฉะเชิงเทรา","แขวงบำรุงทางฉะเชิงเทรา","นตท.เปรง","นตท.ฉะเชิงเทรา","นตท.ดอนสีนนท์","นตท.ชลบุรี","พสถ.ฉะเชิงเทรา","แขวงบำรุงทางปราจีนบุรี","นตท.คลองสิบเก้า","นตท.ปราจีนบุรี","นตท.องครักษ์","นตท.วิหารแดง","นตท.บ้านไผ่นาบุญ","พสถ.ปราจีนบุรี","แขวงบำรุงทางวัฒนานคร","นตท.ประจันตคาม","นตท.กบินทร์บุรี","นตท.สระแก้ว","นตท.วัฒนานคร","นตท.อรัญประเทศ","พสถ.อรัญประเทศ","แขวงบำรุงทางศรีราชา","นตท.บางพระ","นตท.ศรีราชา","นตท.พัทยา","นตท.บ้านพลูตาหลวง","พสถ.ศรีราชา","กองบำรุงทางเขตหัวหิน","แขวงบำรุงทางกาญจนบุรี","นตท.ท่าเรือน้อย","นตท.กาญจนบุรี","นตท.ท่ากิเลน","นตท.วังโพ","พสถ.กาญจนบุรี","แขวงบำรุงทางเพชรบุรี","นตท.ราชบุรี","นตท.ปากท่อ","นตท.เพชรบุรี","นตท.บ้านชะอำ","นตท.สมุทรสงคราม","พสถ.เพชรบุรี","แขวงบำรุงทางวังก์พง","นตท.หัวหิน","นตท.ปราณบุรี","นตท.สามร้อยยอด","นตท.กุยบุรี","นตท.ประจวบคีรีขันธ์","พสถ.หัวหิน","ศูนย์บำรุงทางภาคเหนือ","งานเครื่องกลบำรุงทางหนักตะพานหิน","กองบำรุงทางเขตนครสวรรค์","แขวงบำรุงทางอยุธยา","นตท.ดอนเมือง","นตท.เชียงราก","นตท.เชียงรากน้อย","นตท.บางปะอิน","นตท.อยุธยา","พสถ.อยุธยา","แขวงบำรุงทางลพบุรี","นตท.ท่าเรือ","นตท.หนองโดน","นตท.ลพบุรี","นตท.โคกกะเทียม","พสถ.ลพบุรี","แขวงบำรุงทางนครสวรรค์","นตท.บ้านหมี่","นตท.บ้านตาคลี","นตท.เนินมะกอก","นตท.นครสวรรค์","นตท.ชุมแสง","พสถ.นครสวรรค์","แขวงบำรุงทางพิษณุโลก","นตท.บางมูลนาก","นตท.ตะพานหิน","นตท.ท่าฬ่อ","นตท.พิษณุโลก","นตท.แควน้อย","พสถ.พิษณุโลก","กองบำรุงทางเขตลำปาง","แขวงบำรุงทางอุตรดิตถ์","นตท.หนองตม","นตท.ตรอน","นตท.สวรรคโลกที่บ้านดารา","นตท.ศิลาอาสน์","พสถ.ศิลาอาสน์","แขวงบำรุงทางเด่นชัย","นตท.ปางต้นผึ้ง","นตท.เด่นชัย","นตท.บ้านปิน","นตท.ผาคัน","พสถ.เด่นชัย","แขวงบำรุงทางลำปาง","นตท.แม่จาง","นตท.แม่เมาะ","นตท.ลำปาง","นตท.ห้างฉัตร","พสถ.ลำปาง","แขวงบำรุงทางลำพูน","นตท.ขุนตาน","นตท.ศาลาแม่ทา","นตท.ลำพูน","นตท.เชียงใหม่","พสถ.เชียงใหม่","ศูนย์บำรุงทางภาคตะวันออกเฉียงเหนือ","งานเครื่องกลบำรุงทางหนักแก่งคอย","งานเครื่องกลบำรุงทางหนักนครราชสีมา","กองบำรุงทางเขตสุรินทร์","แขวงบำรุงทางแก่งคอย","นตท.หนองแซง","นตท.สระบุรี","นตท.แก่งคอย","นตท.มวกเหล็ก","นตท.ปางอโศก","พสถ.แก่งคอย","แขวงบำรุงทางนครราชสีมา","นตท.ปากช่อง","นตท.สีคิ้ว","นตท.กุดจิก","นตท.นครราชสีมา","นตท.โนนสูง","พสถ.นครราชสีมา","แขวงบำรุงทางลำปลายมาศ","นตท.จักราช","นตท.ห้วยแถลง","นตท.ลำปลายมาศ","นตท.บุรีรัมย์","นตท.สุรินทร์","พสถ.ลำชี","แขวงบำรุงทางศรีสะเกษ","นตท.ศรีขรภูมิ","นตท.สำโรงทาบ","นตท.ศรีสะเกษ","นตท.กันทรารมย์","นตท.อุบลราชธานี","พสถ.ศรีสะเกษ","๔ กองบำรุงทางเขตขอนแก่น","แขวงบำรุงทางลำนารายณ์","นตท.หินซ้อน","นตท.โคกสลุง","นตท.ลำนารายณ์","นตท.โคกคลี","นตท.บ้านวะตะแบก","พสถ.ลำนารายณ์","แขวงบำรุงทางบัวใหญ่","นตท.บำเหน็จณรงค์","นตท.จัตุรัส","นตท.บ้านเหลื่อม","นตท.บัวใหญ่","นตท.เมืองคง","พสถ.บัวใหญ่","แขวงบำรุงทางขอนแก่น","นตท.หนองบัวลายที่เมืองพล","นตท.บ้านหัน","นตท.บ้านไผ่","นตท.ขอนแก่น","นตท.โนนพยอม","พสถ.ขอนแก่น","แขวงบำรุงทางอุดรธานี","นตท.น้ำพอง","นตท.โนนสะอาด","นตท.หนองตะไก้","นตท.อุดรธานี","นตท.นาทา","พสถ.อุดรธานี","ศูนย์บำรุงทางภาคใต้","งานเครื่องกลบำรุงทางหนักชุมพร","งานเครื่องกลบำรุงทางหนักหาดใหญ่","กองบำรุงทางเขตทุ่งสง","แขวงบำรุงทางบ้านกรูด","นตท.ทับสะแก","นตท.บางสะพานใหญ่","นตท.บางสะพานน้อย","นตท.มาบอำมฤต","นตท.ปะทิว","พสถ.บ้านกรูด","แขวงบำรุงทางชุมพร","นตท.ชุมพร","นตท.สวี","นตท.หลังสวน","นตท.ท่าชนะ","นตท.ไชยา","พสถ.ชุมพร","แขวงบำรุงทางบ้านส้อง","นตท.ท่าฉาง","นตท.คีรีรัฐนิคม","นตท.สุราษฎร์ธานี","นตท.บ้านนา","นตท.บ้านส้อง","พสถ.บ้านส้อง","แขวงบำรุงทางทุ่งสง","นตท.ทานพอ","นตท.ทุ่งสง","นตท.ที่วัง","นตท.ห้วยยอด","นตท.ตรัง","พสถ.ทุ่งสง","กองบำรุงทางเขตหาดใหญ่","แขวงบำรุงทางเขาชุมทอง","นตท.ร่อนพิบูลย์","นตท.เขาชุมทอง","นตท.นครศรีธรรมราช","นตท.ชะอวด","นตท.พัทลุง","พสถ.เขาชุมทอง","แขวงบำรุงทางหาดใหญ่","นตท.บางแก้ว","นตท.ควนเนียง","นตท.หาดใหญ่","นตท.คลองแงะ","พสถ.หาดใหญ่","แขวงบำรุงทางเทพา","นตท.นาม่วง","นตท.จะนะ","นตท.ปัตตานี","นตท.ยะลา","พสถ.เทพา","แขวงบำรุงทางตันหยงมัส","นตท.บาลอ","นตท.ลาโละ","นตท.ตันหยงมัส","นตท.สุไหงโก","พสถ.ตันหยงมัส"];
-
-// ===== STATE =====
-let records = JSON.parse(localStorage.getItem('rail_damage_v3') || '[]');
-let editId = null;
-let selectedSev = '';
-let deleteTargetId = null;
-let charts = {};
-let currentImages = []; // base64 array for current form
-let leafletMap = null;
-let mapMarkers = [];
-
-const SEV_MAP = { low: 'ต่ำ', med: 'ปานกลาง', high: 'สูง' };
-const STATUS_MAP = { pending: 'รอดำเนินการ', inprog: 'กำลังซ่อมแซม', done: 'ซ่อมแซมแล้ว' };
-
-// ===== UTILS =====
-function save() { localStorage.setItem('rail_damage_v3', JSON.stringify(records)); }
-function genId() {
-  return 'RPT-' + new Date().getFullYear() + '-' + String(records.length + 1).padStart(4, '0') + '-' + Math.random().toString(36).slice(2,5).toUpperCase();
+SEVERITY_MAP = {
+    'low': 'ต่ำ',
+    'med': 'ปานกลาง',
+    'high': 'สูง'
 }
 
-function updateClock() {
-  const now = new Date();
-  document.getElementById('topbar-date').textContent =
-    now.toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) +
-    ' · ' + now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-}
-updateClock();
-setInterval(updateClock, 30000);
-
-// ===== NAVIGATION =====
-function switchTab(t) {
-  const tabs = ['report','list','dashboard'];
-  document.querySelectorAll('.nav-item').forEach((n, i) => {
-    n.classList.toggle('active', tabs[i] === t);
-  });
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.getElementById('sec-' + t).classList.add('active');
-  if (t === 'list') { updateMetrics('list-metrics'); renderTable(); }
-  if (t === 'dashboard') { updateMetrics('dash-metrics'); setTimeout(renderDashboard, 80); }
+STATUS_MAP = {
+    'pending': 'รอดำเนินการ',
+    'inprog': 'กำลังซ่อมแซม',
+    'done': 'ซ่อมแซมแล้ว'
 }
 
-// ===== SEVERITY =====
-function setSev(val) {
-  selectedSev = val;
-  document.querySelectorAll('.sev-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector('.sev-btn.' + val).classList.add('active');
-  document.getElementById('err-sev').style.display = 'none';
-}
 
-// ===== DEPT AUTOCOMPLETE =====
-function filterDept(q) {
-  const list = document.getElementById('dept-list');
-  const val = q.trim().toLowerCase();
-  const filtered = val.length === 0
-    ? DEPTS.slice(0, 20)
-    : DEPTS.filter(d => d.toLowerCase().includes(val)).slice(0, 20);
+@app.route('/')
+def index():
+    """Main page"""
+    return render_template('index.html', departments=DEPARTMENTS)
 
-  if (!filtered.length) { list.classList.remove('open'); return; }
-  list.innerHTML = filtered.map(d => {
-    const hl = val ? d.replace(new RegExp(val.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi'), m => `<mark>${m}</mark>`) : d;
-    return `<div class="autocomplete-item" onmousedown="selectDept('${d.replace(/'/g,"\\'")}')">` + hl + `</div>`;
-  }).join('');
-  list.classList.add('open');
-}
-function selectDept(val) {
-  document.getElementById('f-dept').value = val;
-  closeDeptList();
-}
-function closeDeptList() {
-  document.getElementById('dept-list').classList.remove('open');
-}
 
-// ===== IMAGE UPLOAD =====
-function handleImageSelect(e) { processFiles(e.target.files); }
-function handleDragOver(e) { e.preventDefault(); document.getElementById('upload-zone').classList.add('drag-over'); }
-function handleDragLeave(e) { document.getElementById('upload-zone').classList.remove('drag-over'); }
-function handleDrop(e) {
-  e.preventDefault();
-  document.getElementById('upload-zone').classList.remove('drag-over');
-  processFiles(e.dataTransfer.files);
-}
-function processFiles(files) {
-  const arr = Array.from(files).filter(f => f.type.startsWith('image/'));
-  const remaining = 10 - currentImages.length;
-  arr.slice(0, remaining).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      currentImages.push(ev.target.result);
-      renderImagePreviews();
-    };
-    reader.readAsDataURL(file);
-  });
-}
-function renderImagePreviews() {
-  const wrap = document.getElementById('img-previews');
-  wrap.innerHTML = currentImages.map((src, i) => `
-    <div class="img-preview-item">
-      <img src="${src}" alt="ภาพ ${i+1}">
-      <button class="img-preview-del" onclick="removeImage(${i})">✕</button>
-    </div>
-  `).join('');
-}
-function removeImage(i) {
-  currentImages.splice(i, 1);
-  renderImagePreviews();
-}
+@app.route('/api/records', methods=['GET'])
+def get_records():
+    """Get all records"""
+    records = load_records()
+    return jsonify(records)
 
-// ===== ALERT =====
-function showAlert(msg, type) {
-  const el = document.getElementById('form-alert');
-  el.textContent = msg;
-  el.className = 'alert ' + type + ' show';
-  setTimeout(() => el.classList.remove('show'), 4500);
-}
 
-// ===== FORM VALIDATION =====
-function validateField(id, errId, condition) {
-  const el = document.getElementById(id);
-  const err = document.getElementById(errId);
-  if (condition) { el.classList.add('error'); err.style.display = 'block'; return false; }
-  el.classList.remove('error'); err.style.display = 'none'; return true;
-}
+@app.route('/api/records', methods=['POST'])
+def create_record():
+    """Create new damage report"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['date', 'line', 'type', 'severity']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Create new record
+        record = {
+            'id': generate_id(),
+            'date': data.get('date'),
+            'time': data.get('time', ''),
+            'line': data.get('line'),
+            'station': data.get('station', ''),
+            'km': data.get('km'),
+            'railId': data.get('railId', ''),
+            'lat': data.get('lat'),
+            'lng': data.get('lng'),
+            'type': data.get('type'),
+            'length': data.get('length'),
+            'severity': data.get('severity'),
+            'detail': data.get('detail', ''),
+            'action': data.get('action', ''),
+            'images': data.get('images', []),
+            'reporter': data.get('reporter', ''),
+            'position': data.get('position', ''),
+            'dept': data.get('dept', ''),
+            'phone': data.get('phone', ''),
+            'status': data.get('status', 'pending'),
+            'dueDate': data.get('dueDate', ''),
+            'note': data.get('note', ''),
+            'createdAt': datetime.now().isoformat(),
+            'updatedAt': datetime.now().isoformat()
+        }
+        
+        records = load_records()
+        records.append(record)
+        save_records(records)
+        
+        return jsonify({'success': True, 'id': record['id']}), 201
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-// ===== SUBMIT =====
-function submitForm() {
-  const date = document.getElementById('f-date').value;
-  const line = document.getElementById('f-line').value.trim();
-  const type = document.getElementById('f-type').value;
 
-  let valid = true;
-  valid = validateField('f-date', 'err-date', !date) && valid;
-  valid = validateField('f-line', 'err-line', !line) && valid;
-  valid = validateField('f-type', 'err-type', !type) && valid;
-  if (!selectedSev) { document.getElementById('err-sev').style.display = 'block'; valid = false; }
-  if (!valid) { showAlert('กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน', 'error'); return; }
+@app.route('/api/records/<record_id>', methods=['GET'])
+def get_record(record_id):
+    """Get specific record"""
+    records = load_records()
+    for record in records:
+        if record['id'] == record_id:
+            return jsonify(record)
+    return jsonify({'error': 'Not found'}), 404
 
-  const rec = {
-    id: editId || genId(),
-    date, time: document.getElementById('f-time').value,
-    line, station: document.getElementById('f-station').value,
-    km: document.getElementById('f-km').value,
-    railId: document.getElementById('f-railid').value,
-    lat: document.getElementById('f-lat').value,
-    lng: document.getElementById('f-lng').value,
-    type, length: document.getElementById('f-length').value,
-    severity: selectedSev,
-    detail: document.getElementById('f-detail').value,
-    action: document.getElementById('f-action').value,
-    reporter: document.getElementById('f-reporter').value,
-    position: document.getElementById('f-position').value,
-    dept: document.getElementById('f-dept').value,
-    phone: document.getElementById('f-phone').value,
-    status: document.getElementById('f-status').value,
-    due: document.getElementById('f-due').value,
-    note: document.getElementById('f-note').value,
-    images: [...currentImages],
-    createdAt: editId ? (records.find(r => r.id === editId) || {}).createdAt : new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
 
-  if (editId) {
-    const idx = records.findIndex(r => r.id === editId);
-    if (idx > -1) records[idx] = rec;
-    editId = null;
-    document.getElementById('btn-submit-text').textContent = 'บันทึกรายงาน';
-    showAlert('✅ อัปเดตรายการ ' + rec.id + ' เรียบร้อยแล้ว', 'success');
-  } else {
-    records.unshift(rec);
-    showAlert('✅ บันทึกรายงาน ' + rec.id + ' เรียบร้อยแล้ว', 'success');
-  }
-  save();
-  clearForm();
-}
+@app.route('/api/records/<record_id>', methods=['PUT'])
+def update_record(record_id):
+    """Update damage report"""
+    try:
+        data = request.get_json()
+        records = load_records()
+        
+        for i, record in enumerate(records):
+            if record['id'] == record_id:
+                # Update fields
+                for key, value in data.items():
+                    if key != 'id' and key != 'createdAt':
+                        record[key] = value
+                record['updatedAt'] = datetime.now().isoformat()
+                save_records(records)
+                return jsonify({'success': True})
+        
+        return jsonify({'error': 'Not found'}), 404
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-function clearForm() {
-  ['f-date','f-time','f-line','f-station','f-km','f-railid','f-lat','f-lng','f-length','f-detail','f-action','f-reporter','f-position','f-dept','f-phone','f-due','f-note'].forEach(id => {
-    const el = document.getElementById(id);
-    el.value = ''; el.classList.remove('error');
-  });
-  document.getElementById('f-type').value = '';
-  document.getElementById('f-status').value = 'pending';
-  document.querySelectorAll('.sev-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.field-error').forEach(e => e.style.display = 'none');
-  selectedSev = ''; editId = null;
-  currentImages = [];
-  renderImagePreviews();
-  document.getElementById('btn-submit-text').textContent = 'บันทึกรายงาน';
-  document.getElementById('f-date').value = new Date().toISOString().slice(0, 10);
-}
 
-// ===== EDIT =====
-function editRecord(id) {
-  const r = records.find(x => x.id === id); if (!r) return;
-  editId = id;
-  document.getElementById('f-date').value = r.date || '';
-  document.getElementById('f-time').value = r.time || '';
-  document.getElementById('f-line').value = r.line || '';
-  document.getElementById('f-station').value = r.station || '';
-  document.getElementById('f-km').value = r.km || '';
-  document.getElementById('f-railid').value = r.railId || '';
-  document.getElementById('f-lat').value = r.lat || '';
-  document.getElementById('f-lng').value = r.lng || '';
-  document.getElementById('f-type').value = r.type || '';
-  document.getElementById('f-length').value = r.length || '';
-  document.getElementById('f-detail').value = r.detail || '';
-  document.getElementById('f-action').value = r.action || '';
-  document.getElementById('f-reporter').value = r.reporter || '';
-  document.getElementById('f-position').value = r.position || '';
-  document.getElementById('f-dept').value = r.dept || '';
-  document.getElementById('f-phone').value = r.phone || '';
-  document.getElementById('f-status').value = r.status || 'pending';
-  document.getElementById('f-due').value = r.due || '';
-  document.getElementById('f-note').value = r.note || '';
-  currentImages = r.images ? [...r.images] : [];
-  renderImagePreviews();
-  if (r.severity) setSev(r.severity);
-  document.getElementById('btn-submit-text').textContent = 'อัปเดตรายการ';
-  switchTab('report');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
+@app.route('/api/records/<record_id>', methods=['DELETE'])
+def delete_record(record_id):
+    """Delete damage report"""
+    try:
+        records = load_records()
+        records = [r for r in records if r['id'] != record_id]
+        save_records(records)
+        return jsonify({'success': True})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-// ===== DELETE =====
-function confirmDelete(id) {
-  deleteTargetId = id;
-  document.getElementById('confirm-modal').classList.add('show');
-}
-function closeModal(id) {
-  document.getElementById(id).classList.remove('show');
-  if (id === 'confirm-modal') deleteTargetId = null;
-}
-document.getElementById('confirm-delete-btn').onclick = function () {
-  if (!deleteTargetId) return;
-  records = records.filter(r => r.id !== deleteTargetId);
-  save(); closeModal('confirm-modal'); renderTable(); updateMetrics('list-metrics');
-};
 
-// ===== PHOTOS =====
-function viewPhotos(id) {
-  const r = records.find(x => x.id === id);
-  if (!r || !r.images || !r.images.length) return;
-  document.getElementById('photo-gallery').innerHTML = r.images.map(src =>
-    `<img src="${src}" alt="ภาพความเสียหาย" onclick="window.open('${src}','_blank')">`
-  ).join('');
-  document.getElementById('photo-modal').classList.add('show');
-}
-
-// ===== METRICS =====
-function updateMetrics(targetId) {
-  const total = records.length;
-  const high = records.filter(r => r.severity === 'high').length;
-  const pending = records.filter(r => r.status === 'pending').length;
-  const done = records.filter(r => r.status === 'done').length;
-  const html = `
-    <div class="metric-card blue"><div class="metric-bg-icon">📋</div><div class="metric-label">รายการทั้งหมด</div><div class="metric-value">${total}</div><div class="metric-sub">รายการในระบบ</div></div>
-    <div class="metric-card red"><div class="metric-bg-icon">⚠️</div><div class="metric-label">ความรุนแรงสูง</div><div class="metric-value">${high}</div><div class="metric-sub">ต้องดำเนินการด่วน</div></div>
-    <div class="metric-card amber"><div class="metric-bg-icon">🔧</div><div class="metric-label">รอดำเนินการ</div><div class="metric-value">${pending}</div><div class="metric-sub">ยังไม่ได้ซ่อม</div></div>
-    <div class="metric-card green"><div class="metric-bg-icon">✅</div><div class="metric-label">ซ่อมแซมแล้ว</div><div class="metric-value">${done}</div><div class="metric-sub">เสร็จสิ้น</div></div>`;
-  const el = document.getElementById(targetId);
-  if (el) el.innerHTML = html;
-}
-
-// ===== TABLE =====
-function renderTable() {
-  const search = document.getElementById('search-text').value.toLowerCase();
-  const sevF = document.getElementById('filter-sev').value;
-  const statF = document.getElementById('filter-status').value;
-
-  const filtered = records.filter(r => {
-    if (sevF && r.severity !== sevF) return false;
-    if (statF && r.status !== statF) return false;
-    if (search) {
-      const hay = [r.line, r.station, r.type, r.reporter, r.id, r.railId, r.dept].join(' ').toLowerCase();
-      if (!hay.includes(search)) return false;
+@app.route('/api/statistics', methods=['GET'])
+def get_statistics():
+    """Get statistics for dashboard"""
+    records = load_records()
+    
+    stats = {
+        'total': len(records),
+        'high': len([r for r in records if r.get('severity') == 'high']),
+        'pending': len([r for r in records if r.get('status') == 'pending']),
+        'resolved': len([r for r in records if r.get('status') == 'done']),
+        'severityBreakdown': {},
+        'statusBreakdown': {},
+        'typeBreakdown': {},
+        'lineBreakdown': {},
+        'hotAreas': {}
     }
-    return true;
-  });
+    
+    # Severity breakdown
+    for sev in ['low', 'med', 'high']:
+        count = len([r for r in records if r.get('severity') == sev])
+        stats['severityBreakdown'][SEVERITY_MAP.get(sev, sev)] = count
+    
+    # Status breakdown
+    for status in ['pending', 'inprog', 'done']:
+        count = len([r for r in records if r.get('status') == status])
+        stats['statusBreakdown'][STATUS_MAP.get(status, status)] = count
+    
+    # Type breakdown
+    for record in records:
+        dtype = record.get('type', 'Unknown')
+        stats['typeBreakdown'][dtype] = stats['typeBreakdown'].get(dtype, 0) + 1
+    
+    # Line breakdown
+    for record in records:
+        line = record.get('line', 'Unknown')
+        stats['lineBreakdown'][line] = stats['lineBreakdown'].get(line, 0) + 1
+    
+    # Hot areas (locations with most reports)
+    for record in records:
+        key = f"{record.get('line', '')} - {record.get('station', '')}"
+        stats['hotAreas'][key] = stats['hotAreas'].get(key, 0) + 1
+    
+    return jsonify(stats)
 
-  document.getElementById('record-count').textContent = `แสดง ${filtered.length} จาก ${records.length} รายการ`;
-  const tbody = document.getElementById('table-body');
-  const empty = document.getElementById('empty-state');
 
-  if (!filtered.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
-  empty.style.display = 'none';
-
-  tbody.innerHTML = filtered.map(r => `
-    <tr>
-      <td><div class="record-id">${r.id}</div></td>
-      <td><div>${r.date}</div>${r.time ? `<div class="record-sub">${r.time}</div>` : ''}</td>
-      <td>
-        <div class="record-loc">${r.line}</div>
-        <div class="record-sub">${[r.station, r.km ? 'กม.' + r.km : ''].filter(Boolean).join(' · ')}</div>
-      </td>
-      <td>
-        ${r.lat && r.lng
-          ? `<div style="font-size:12px;color:var(--gray-600)">📍 ${parseFloat(r.lat).toFixed(4)}, ${parseFloat(r.lng).toFixed(4)}</div>`
-          : `<span style="color:var(--gray-300);font-size:12px">—</span>`}
-      </td>
-      <td>
-        <div>${r.type}</div>
-        ${r.length ? `<div class="record-sub">ยาว ${r.length} ม.</div>` : ''}
-      </td>
-      <td><span class="badge ${r.severity}"><span class="badge-dot"></span>${SEV_MAP[r.severity] || r.severity}</span></td>
-      <td><span class="badge ${r.status}">${STATUS_MAP[r.status] || r.status}</span></td>
-      <td>
-        <div>${r.reporter || '-'}</div>
-        <div class="record-sub">${r.dept || ''}</div>
-      </td>
-      <td>
-        <div class="action-btns">
-          ${r.images && r.images.length ? `<button class="btn btn-success btn-sm" onclick="viewPhotos('${r.id}')">📷 ${r.images.length}</button>` : ''}
-          <button class="btn btn-secondary btn-sm" onclick="editRecord('${r.id}')">✏️</button>
-          <button class="btn btn-danger btn-sm" onclick="confirmDelete('${r.id}')">🗑️</button>
-        </div>
-      </td>
-    </tr>`).join('');
-}
-
-// ===== DASHBOARD =====
-function renderDashboard() {
-  updateMetrics('dash-metrics');
-  renderMap();
-  renderCharts();
-  renderHotAreas();
-}
-
-// ===== MAP =====
-function getMarkerColor(type) {
-  if (!type) return '#64748b';
-  if (type.includes('รางหัก')) return '#c0392b';
-  if (type.includes('แตกร้าว')) return '#1a56a0';
-  if (type.includes('ชำรุด')) return '#d97706';
-  return '#64748b';
-}
-
-function renderMap() {
-  const withCoords = records.filter(r => r.lat && r.lng && !isNaN(r.lat) && !isNaN(r.lng));
-
-  if (!leafletMap) {
-    const center = withCoords.length > 0
-      ? [parseFloat(withCoords[0].lat), parseFloat(withCoords[0].lng)]
-      : [13.7563, 100.5018];
-    leafletMap = L.map('leaflet-map').setView(center, 7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(leafletMap);
-  } else {
-    mapMarkers.forEach(m => m.remove());
-    mapMarkers = [];
-  }
-
-  if (!withCoords.length) return;
-
-  withCoords.forEach(r => {
-    const color = getMarkerColor(r.type);
-    const icon = L.divIcon({
-      html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35)"></div>`,
-      className: '',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7]
-    });
-    const m = L.marker([parseFloat(r.lat), parseFloat(r.lng)], { icon })
-      .addTo(leafletMap)
-      .bindPopup(`
-        <div style="font-family:Sarabun,sans-serif;min-width:180px">
-          <div style="font-weight:700;margin-bottom:4px">${r.type}</div>
-          <div style="font-size:12px;color:#555">${r.line} · ${r.station || ''}</div>
-          <div style="font-size:12px;margin-top:6px">
-            <span style="background:${color === '#c0392b' ? '#fee2e2' : color === '#1a56a0' ? '#dbeafe' : '#fef3c7'};padding:2px 7px;border-radius:12px;font-weight:600;font-size:11px">${SEV_MAP[r.severity] || ''}</span>
-            <span style="background:#f1f5f9;padding:2px 7px;border-radius:12px;font-size:11px;margin-left:4px">${STATUS_MAP[r.status] || ''}</span>
-          </div>
-          <div style="font-size:11px;color:#888;margin-top:4px">${r.date}</div>
-        </div>
-      `);
-    mapMarkers.push(m);
-  });
-
-  if (withCoords.length > 0) {
-    const group = L.featureGroup(mapMarkers);
-    leafletMap.fitBounds(group.getBounds().pad(0.1));
-  }
-}
-
-// ===== HOT AREAS =====
-function renderHotAreas() {
-  const counts = {};
-  records.forEach(r => {
-    const key = r.line + (r.station ? ' · ' + r.station : '');
-    counts[key] = (counts[key] || 0) + 1;
-  });
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const max = sorted.length ? sorted[0][1] : 1;
-
-  document.getElementById('hotarea-body').innerHTML = sorted.length
-    ? sorted.map(([name, cnt], i) => `
-      <tr>
-        <td><strong>${i + 1}</strong></td>
-        <td>${name}</td>
-        <td><strong>${cnt}</strong> ครั้ง</td>
-        <td>
-          <div class="hotarea-bar">
-            <div class="hotarea-bar-track">
-              <div class="hotarea-bar-fill" style="width:${(cnt/max*100).toFixed(1)}%"></div>
-            </div>
-            <span style="font-size:12px;color:var(--gray-400);min-width:36px">${(cnt/records.length*100).toFixed(0)}%</span>
-          </div>
-        </td>
-      </tr>`).join('')
-    : `<tr><td colspan="4" style="text-align:center;color:var(--gray-400);padding:24px">ยังไม่มีข้อมูล</td></tr>`;
-}
-
-// ===== CHARTS =====
-function destroyChart(key) {
-  if (charts[key]) { charts[key].destroy(); delete charts[key]; }
-}
-
-function renderCharts() {
-  const sevCounts = { low: 0, med: 0, high: 0 };
-  const statCounts = { pending: 0, inprog: 0, done: 0 };
-  const typeCounts = {};
-  const lineCounts = {};
-
-  records.forEach(r => {
-    if (r.severity) sevCounts[r.severity]++;
-    if (r.status) statCounts[r.status]++;
-    if (r.type) typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
-    if (r.line) lineCounts[r.line] = (lineCounts[r.line] || 0) + 1;
-  });
-
-  destroyChart('sev');
-  charts['sev'] = new Chart(document.getElementById('chart-sev'), {
-    type: 'doughnut',
-    data: {
-      labels: ['ต่ำ', 'ปานกลาง', 'สูง'],
-      datasets: [{ data: [sevCounts.low, sevCounts.med, sevCounts.high], backgroundColor: ['#16a34a', '#d97706', '#c0392b'], borderWidth: 3, borderColor: '#fff' }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { display: false } } }
-  });
-  makeLegend('legend-sev', ['ต่ำ', 'ปานกลาง', 'สูง'], ['#16a34a', '#d97706', '#c0392b'], [sevCounts.low, sevCounts.med, sevCounts.high]);
-
-  destroyChart('status');
-  charts['status'] = new Chart(document.getElementById('chart-status'), {
-    type: 'doughnut',
-    data: {
-      labels: ['รอดำเนินการ', 'กำลังซ่อมแซม', 'ซ่อมแซมแล้ว'],
-      datasets: [{ data: [statCounts.pending, statCounts.inprog, statCounts.done], backgroundColor: ['#1a56a0', '#d97706', '#16a34a'], borderWidth: 3, borderColor: '#fff' }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { display: false } } }
-  });
-  makeLegend('legend-status', ['รอดำเนินการ', 'กำลังซ่อมแซม', 'ซ่อมแซมแล้ว'], ['#1a56a0', '#d97706', '#16a34a'], [statCounts.pending, statCounts.inprog, statCounts.done]);
-
-  const typeLabels = Object.keys(typeCounts).sort((a,b) => typeCounts[b] - typeCounts[a]);
-  const typeData = typeLabels.map(k => typeCounts[k]);
-  document.getElementById('type-chart-wrap').style.height = Math.max(200, typeLabels.length * 40 + 60) + 'px';
-  destroyChart('type');
-  charts['type'] = new Chart(document.getElementById('chart-type'), {
-    type: 'bar',
-    data: {
-      labels: typeLabels,
-      datasets: [{ label: 'จำนวนรายงาน', data: typeData, backgroundColor: typeLabels.map((_, i) => `hsl(${210 + i * 15},70%,${45 + i * 2}%)`), borderRadius: 6 }]
-    },
-    options: {
-      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } }, y: { ticks: { font: { size: 12, family: 'Sarabun' } } } }
+@app.route('/api/export/csv', methods=['GET'])
+def export_csv():
+    """Export records as CSV"""
+    import csv
+    from io import StringIO
+    
+    records = load_records()
+    
+    output = StringIO()
+    writer = csv.writer(output, lineterminator='\n')
+    
+    # Header
+    headers = ['รหัส', 'วันที่', 'เวลา', 'สาย', 'สถานี', 'ประเภท', 'ความรุนแรง', 'สถานะ', 'ผู้รายงาน']
+    writer.writerow(headers)
+    
+    # Data
+    for record in records:
+        writer.writerow([
+            record.get('id'),
+            record.get('date'),
+            record.get('time'),
+            record.get('line'),
+            record.get('station'),
+            record.get('type'),
+            SEVERITY_MAP.get(record.get('severity'), ''),
+            STATUS_MAP.get(record.get('status'), ''),
+            record.get('reporter')
+        ])
+    
+    return output.getvalue(), 200, {
+        'Content-Disposition': 'attachment; filename=rail_damage_report.csv',
+        'Content-type': 'text/csv; charset=utf-8'
     }
-  });
 
-  const lineLabels = Object.keys(lineCounts).sort((a,b) => lineCounts[b] - lineCounts[a]);
-  const lineData = lineLabels.map(k => lineCounts[k]);
-  document.getElementById('line-chart-wrap').style.height = Math.max(200, lineLabels.length * 38 + 60) + 'px';
-  destroyChart('line');
-  charts['line'] = new Chart(document.getElementById('chart-line'), {
-    type: 'bar',
-    data: {
-      labels: lineLabels,
-      datasets: [{ label: 'จำนวนรายงาน', data: lineData, backgroundColor: '#1e4d9e', borderRadius: 6 }]
-    },
-    options: {
-      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } }, y: { ticks: { font: { size: 12, family: 'Sarabun' } } } }
-    }
-  });
-}
 
-function makeLegend(id, labels, colors, vals) {
-  document.getElementById(id).innerHTML = labels.map((l, i) =>
-    `<div class="legend-item"><span class="legend-dot" style="background:${colors[i]}"></span>${l} (${vals[i]})</div>`
-  ).join('');
-}
+@app.route('/api/departments', methods=['GET'])
+def get_departments():
+    """Get list of departments"""
+    return jsonify(DEPARTMENTS)
 
-// ===== EXPORT CSV =====
-function exportCSV() {
-  if (!records.length) { alert('ไม่มีข้อมูลสำหรับส่งออก'); return; }
-  const headers = ['รหัส','วันที่','เวลา','สาย','สถานี','กม.','รหัสราง','Latitude','Longitude','ประเภทความเสียหาย','ระดับความรุนแรง','ความยาว(ม.)','สถานะ','ผู้รายงาน','ตำแหน่ง','หน่วยงาน','เบอร์ติดต่อ','กำหนดซ่อมเสร็จ','รายละเอียด','มาตรการเบื้องต้น','หมายเหตุ','จำนวนภาพ'];
-  const rows = records.map(r => [
-    r.id, r.date, r.time, r.line, r.station, r.km, r.railId,
-    r.lat || '', r.lng || '',
-    r.type, SEV_MAP[r.severity] || '', r.length,
-    STATUS_MAP[r.status] || '', r.reporter, r.position, r.dept, r.phone,
-    r.due, r.detail, r.action, r.note,
-    r.images ? r.images.length : 0
-  ].map(v => `"${(v || '').toString().replace(/"/g,'""')}"`).join(','));
-  const csv = '\uFEFF' + [headers.join(','), ...rows].join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = 'รายงานรางชำรุด_' + new Date().toISOString().slice(0, 10) + '.csv';
-  a.click();
-}
 
-// ===== INIT =====
-document.getElementById('f-date').value = new Date().toISOString().slice(0, 10);
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors"""
+    return jsonify({'error': 'Not found'}), 404
 
-// Close modals on overlay click
-document.querySelectorAll('.modal-overlay').forEach(overlay => {
-  overlay.addEventListener('click', e => {
-    if (e.target === overlay) {
-      const id = overlay.id;
-      if (id !== 'confirm-modal') closeModal(id);
-    }
-  });
-});
-</script>
-</body>
-</html>
+
+@app.errorhandler(500)
+def server_error(error):
+    """Handle 500 errors"""
+    return jsonify({'error': 'Server error'}), 500
+
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
