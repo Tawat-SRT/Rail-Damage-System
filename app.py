@@ -12,8 +12,15 @@ import random
 import csv
 from io import StringIO
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ModuleNotFoundError:
+    px = None
+    go = None
+    PLOTLY_AVAILABLE = False
 
 # ----------------- 1. Page Config -----------------
 st.set_page_config(
@@ -420,6 +427,100 @@ STATION_COORDS = {
 
 records = load_records()
 
+def render_basic_dashboard(records):
+    st.warning(
+        "ระบบยังไม่พบแพ็กเกจ Plotly จึงแสดงแดชบอร์ดแบบพื้นฐานชั่วคราว "
+        "กรุณาตรวจสอบว่าไฟล์ requirements.txt มี plotly และอยู่ใน root ของโปรเจกต์"
+    )
+
+    map_records = [r for r in records if r.get('lat') and r.get('lon')]
+    st.markdown('<div class="section-header"><h4>🗺️ แผนที่จุดเกิดเหตุ</h4></div>',
+                unsafe_allow_html=True)
+    if map_records:
+        map_df = pd.DataFrame([{
+            'lat': r.get('lat'),
+            'lon': r.get('lon'),
+            'รหัส': r.get('id', '–'),
+            'ประเภท': r.get('type', '–'),
+            'สถานี': r.get('station', '–'),
+            'KM': r.get('km', '–'),
+        } for r in map_records])
+        st.map(map_df[['lat', 'lon']])
+        st.dataframe(map_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("⚠️ ยังไม่มีพิกัด — กรอกละติจูด/ลองจิจูด หรือชื่อสถานี ตอนแจ้งเหตุ")
+
+    ch1, ch2 = st.columns(2)
+    with ch1:
+        st.markdown('<div class="section-header"><h4>💥 สถิติประเภทความเสียหาย</h4></div>',
+                    unsafe_allow_html=True)
+        type_df = pd.DataFrame(
+            [{'ประเภท': k, 'จำนวน': v} for k, v in pd.Series(
+                [r.get('type', 'ไม่ระบุ') for r in records]
+            ).value_counts().items()]
+        )
+        st.bar_chart(type_df.set_index('ประเภท'))
+
+    with ch2:
+        st.markdown('<div class="section-header"><h4>📍 พื้นที่/สถานีที่เกิดบ่อย</h4></div>',
+                    unsafe_allow_html=True)
+        station_df = pd.DataFrame(
+            [{'สถานี': k, 'จำนวน': v} for k, v in pd.Series(
+                [r.get('station') or r.get('line', 'ไม่ระบุ') or 'ไม่ระบุ' for r in records]
+            ).value_counts().head(10).items()]
+        )
+        st.bar_chart(station_df.set_index('สถานี'))
+
+    ch3, ch4 = st.columns(2)
+    with ch3:
+        st.markdown('<div class="section-header"><h4>🔧 สถานะการซ่อมแซม</h4></div>',
+                    unsafe_allow_html=True)
+        status_df = pd.DataFrame({
+            'สถานะ': [STATUS_MAP[k] for k in STATUS_MAP],
+            'จำนวน': [len([r for r in records if r.get('status') == k]) for k in STATUS_MAP]
+        })
+        st.bar_chart(status_df.set_index('สถานะ'))
+
+    with ch4:
+        st.markdown('<div class="section-header"><h4>⚠️ ระดับความรุนแรง</h4></div>',
+                    unsafe_allow_html=True)
+        severity_df = pd.DataFrame({
+            'ความรุนแรง': [SEVERITY_MAP[k] for k in SEVERITY_MAP],
+            'จำนวน': [len([r for r in records if r.get('severity') == k]) for k in SEVERITY_MAP]
+        })
+        st.bar_chart(severity_df.set_index('ความรุนแรง'))
+
+    date_counts = {}
+    for r in records:
+        d = r.get('date', '')
+        if d:
+            date_counts[d] = date_counts.get(d, 0) + 1
+    if date_counts:
+        st.markdown('<div class="section-header"><h4>📈 แนวโน้มการรายงานตามวัน</h4></div>',
+                    unsafe_allow_html=True)
+        date_df = pd.DataFrame({
+            'วันที่': list(date_counts.keys()),
+            'จำนวน': list(date_counts.values())
+        })
+        date_df['วันที่'] = pd.to_datetime(date_df['วันที่'])
+        date_df = date_df.sort_values('วันที่')
+        st.line_chart(date_df.set_index('วันที่'))
+
+    latest = sorted(records, key=lambda x: x.get('createdAt', ''), reverse=True)[:10]
+    st.markdown('<div class="section-header"><h4>📋 สรุปรายการล่าสุด 10 รายการ</h4></div>',
+                unsafe_allow_html=True)
+    summary_df = pd.DataFrame([{
+        'รหัส': r.get('id'),
+        'วันที่': r.get('date'),
+        'สาย': r.get('line', '–'),
+        'สถานี': r.get('station', '–'),
+        'ประเภท': r.get('type', '–'),
+        'ความรุนแรง': SEVERITY_MAP.get(r.get('severity'), '–'),
+        'สถานะ': STATUS_MAP.get(r.get('status'), '–'),
+        'ผู้รายงาน': r.get('reporter', '–'),
+    } for r in latest])
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
 # ----------------- 4. Sidebar -----------------
 with st.sidebar:
     st.markdown("""
@@ -719,6 +820,10 @@ elif menu == "📊 แดชบอร์ดสถิติ":
     if total == 0:
         st.info("📭 ยังไม่มีข้อมูล กรุณาแจ้งความเสียหายก่อน")
     else:
+        if not PLOTLY_AVAILABLE:
+            render_basic_dashboard(records)
+            st.stop()
+
         # =====================================================
         # แผนที่ — รองรับทั้ง Plotly รุ่นใหม่และรุ่นเก่า
         # =====================================================
