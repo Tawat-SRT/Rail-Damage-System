@@ -3,11 +3,15 @@ Rail Damage Reporting System - Flask Application
 ระบบรายงานรางชำรุดหักแตกร้าว
 """
 
+from flask import Flask, request, jsonify # เพิ่มกลับเข้ามา
 from datetime import datetime
 import json
 import os
 from pathlib import Path
+import random
 
+# กำหนดตัวแปร app ให้ Flask รู้จัก
+app = Flask(__name__)
 app.config['JSON_THAI_ENABLED'] = True
 
 # Database file
@@ -34,7 +38,6 @@ def generate_id():
     records = load_records()
     year = datetime.now().year
     num = len(records) + 1
-    import random
     suffix = ''.join([chr(random.randint(65, 90)) for _ in range(3)])
     return f'RPT-{year}-{num:04d}-{suffix}'
 
@@ -63,9 +66,6 @@ STATUS_MAP = {
     'inprog': 'กำลังซ่อมแซม',
     'done': 'ซ่อมแซมแล้ว'
 }
-
-
-
 
 @app.route('/api/records', methods=['GET'])
 def get_records():
@@ -267,4 +267,6 @@ def server_error(error):
     """Handle 500 errors"""
     return jsonify({'error': 'Server error'}), 500
 
-
+# เพิ่มคำสั่งรันเซิร์ฟเวอร์
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
