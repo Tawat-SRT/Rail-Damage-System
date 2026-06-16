@@ -1,6 +1,6 @@
 """
 Rail Damage Reporting System - Streamlit Application
-ระบบรายงานรางชำรุด หัก แตกร้าว
+ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)
 
 Run with:
 streamlit run rail_damage_reporting_system_v2.py
@@ -31,14 +31,13 @@ BASE_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DATA_FILE = DATA_DIR / "rail_damage_records.json"
-DEPARTMENT_FILE = BASE_DIR / "ศูนย์ เขต แขวง ตอน.xlsx"
 
 DATA_DIR.mkdir(exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 st.set_page_config(
-    page_title="ระบบรายงานรางชำรุด หัก แตกร้าว",
+    page_title="ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -127,6 +126,17 @@ html, body, [class*="css"] {
     font-size: 15px;
     color: rgba(255,255,255,0.78);
     max-width: 760px;
+}
+
+.hero-producer {
+    margin-top: 12px;
+    display: inline-flex;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(247, 241, 230, 0.12);
+    color: #f7f1e6;
+    font-size: 13px;
+    font-weight: 700;
 }
 
 .section-title {
@@ -289,16 +299,6 @@ STATUS_MAP = {
     "done": "ซ่อมแซมแล้ว",
 }
 
-FALLBACK_DEPARTMENTS = [
-    "ศูนย์อาคารและสถานที่",
-    "กองบำรุงอาคารสถานที่เขตกรุงเทพ",
-    "พสถ.กรุงเทพ",
-    "ศูนย์บำรุงทางภาคกลาง",
-    "กองบำรุงทางเขตกรุงเทพ",
-    "แขวงบำรุงทางกรุงเทพ",
-    "นตท.กรุงเทพ",
-]
-
 COLOR_BY_DAMAGE = {
     "รางหัก": [122, 0, 25, 205],
     "รางชำรุด": [224, 130, 0, 200],
@@ -317,30 +317,6 @@ def load_records() -> list[dict[str, Any]]:
 
 def save_records(records: list[dict[str, Any]]) -> None:
     DATA_FILE.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-@st.cache_data(show_spinner=False)
-def load_departments(path: str) -> list[str]:
-    excel_path = Path(path)
-    if not excel_path.exists():
-        return FALLBACK_DEPARTMENTS
-
-    try:
-        df = pd.read_excel(excel_path)
-    except Exception:
-        return FALLBACK_DEPARTMENTS
-
-    col = "หน่วยงาน" if "หน่วยงาน" in df.columns else df.columns[0]
-    departments = (
-        df[col]
-        .dropna()
-        .astype(str)
-        .map(lambda value: re.sub(r"\s+", " ", value).strip())
-        .loc[lambda series: series.ne("")]
-        .drop_duplicates()
-        .tolist()
-    )
-    return departments or FALLBACK_DEPARTMENTS
 
 
 def generate_id(records: list[dict[str, Any]]) -> str:
@@ -438,10 +414,11 @@ def render_hero() -> None:
         """
 <div class="hero">
   <div class="hero-kicker">SRT Permanent Way</div>
-  <div class="hero-title">ระบบรายงานรางชำรุด หัก แตกร้าว</div>
+  <div class="hero-title">ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)</div>
   <div class="hero-subtitle">
     บันทึกเหตุจากแบบฟอร์มภาคสนาม ติดตามสถานะการซ่อม และดูพื้นที่เสี่ยงจากสถิติและแผนที่ในหน้าเดียว
   </div>
+  <div class="hero-producer">จัดทำโดย กองทางถาวร และกองเทคนิคทางถาวร</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -525,7 +502,6 @@ def render_damage_map(records: list[dict[str, Any]]) -> None:
     st.pydeck_chart(deck, use_container_width=True)
 
 
-departments = load_departments(str(DEPARTMENT_FILE))
 records = load_records()
 
 render_hero()
@@ -539,7 +515,7 @@ with st.sidebar:
     )
     st.markdown("---")
     st.caption("Rail Damage Reporting System v2.0")
-    st.caption(f"หน่วยงานจาก Excel: {len(departments):,} รายการ")
+    st.caption("จัดทำโดย กองทางถาวร และกองเทคนิคทางถาวร")
 
 
 if menu == "แจ้งความเสียหาย":
@@ -656,13 +632,13 @@ if menu == "แจ้งความเสียหาย":
             type=["png", "jpg", "jpeg", "pdf"],
         )
 
-        section("6. ข้อมูลผู้รายงาน", "รายชื่อหน่วยงาน/เขตอ่านจากไฟล์ Excel ที่แนบ")
+        section("6. ข้อมูลผู้รายงาน", "กรอกหน่วยงาน/เขตตามหน่วยงานต้นสังกัดหรือพื้นที่รับผิดชอบ")
         u1, u2, u3 = st.columns(3)
         with u1:
             reporter_input = st.text_input("ผู้รายงาน *")
             position_input = st.text_input("ตำแหน่ง")
         with u2:
-            dept_input = st.selectbox("หน่วยงาน/เขต *", options=departments)
+            dept_input = st.text_input("หน่วยงาน/เขต *", placeholder="เช่น แขวงบำรุงทาง... / นตท....")
             phone_input = st.text_input("เบอร์โทรศัพท์")
         with u3:
             approved_by = st.text_input("ผู้ตรวจ/ผู้รับรอง")
