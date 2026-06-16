@@ -12,10 +12,11 @@ import random
 import csv
 import base64
 import html
+import textwrap
 import urllib.error
 import urllib.parse
 import urllib.request
-from io import StringIO
+from io import BytesIO, StringIO
 import pandas as pd
 
 try:
@@ -26,6 +27,39 @@ except ModuleNotFoundError:
     px = None
     go = None
     PLOTLY_AVAILABLE = False
+
+try:
+    from docx import Document
+    from docx.shared import Pt
+    DOCX_AVAILABLE = True
+except ModuleNotFoundError:
+    Document = None
+    Pt = None
+    DOCX_AVAILABLE = False
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas
+    REPORTLAB_AVAILABLE = True
+except ModuleNotFoundError:
+    A4 = None
+    mm = None
+    pdfmetrics = None
+    TTFont = None
+    canvas = None
+    REPORTLAB_AVAILABLE = False
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    PIL_AVAILABLE = True
+except ModuleNotFoundError:
+    Image = None
+    ImageDraw = None
+    ImageFont = None
+    PIL_AVAILABLE = False
 
 # ----------------- 1. Page Config -----------------
 st.set_page_config(
@@ -514,6 +548,170 @@ def build_bt27_report_html(record):
 </body>
 </html>"""
 
+def get_thai_font_path():
+    font_dir = APP_DIR / 'data' / 'fonts'
+    font_dir.mkdir(parents=True, exist_ok=True)
+    local_font = font_dir / 'NotoSansThai-Regular.ttf'
+    if local_font.exists():
+        return str(local_font)
+
+    candidates = [
+        '/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf',
+        '/usr/share/fonts/truetype/noto/NotoSansThaiUI-Regular.ttf',
+        '/usr/share/fonts/truetype/tlwg/Garuda.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    ]
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+
+    try:
+        url = 'https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansThai/NotoSansThai-Regular.ttf'
+        urllib.request.urlretrieve(url, local_font)
+        return str(local_font)
+    except Exception:
+        return None
+
+def wrap_text_for_report(text, width=92):
+    lines = []
+    for line in str(text).splitlines():
+        if not line.strip():
+            lines.append("")
+            continue
+        wrapped = textwrap.wrap(line, width=width, replace_whitespace=False, drop_whitespace=False)
+        lines.extend(wrapped or [""])
+    return lines
+
+def build_bt27_docx_bytes(record):
+    if not DOCX_AVAILABLE:
+        return None
+
+    buffer = BytesIO()
+    doc = Document()
+    styles = doc.styles
+    styles['Normal'].font.name = 'TH Sarabun New'
+    styles['Normal'].font.size = Pt(14)
+
+    title = doc.add_heading('รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)', level=1)
+    for run in title.runs:
+        run.font.name = 'TH Sarabun New'
+        run.font.size = Pt(18)
+
+    for line in build_bt27_report_text(record).splitlines()[2:]:
+        if not line:
+            doc.add_paragraph("")
+        elif line in (
+            "1-10 รายการทั่วไป",
+            "11-19 รายละเอียดเกี่ยวกับราง",
+            "20-22 รายละเอียดเกี่ยวกับทางและเหล็กประกบราง",
+            "23-28 รายละเอียดเกี่ยวกับรางชำรุด หัก แตกร้าว",
+            "พิกัด/หมายเหตุ/การดำเนินการ",
+            "ข้อมูลผู้รายงาน",
+        ):
+            doc.add_heading(line, level=2)
+        else:
+            doc.add_paragraph(line)
+
+    doc.save(buffer)
+    return buffer.getvalue()
+
+def build_bt27_pdf_bytes(record):
+    if not REPORTLAB_AVAILABLE:
+        return None
+
+    font_path = get_thai_font_path()
+    font_name = 'Helvetica'
+    if font_path:
+        font_name = 'NotoSansThai'
+        try:
+            pdfmetrics.registerFont(TTFont(font_name, font_path))
+        except Exception:
+            font_name = 'Helvetica'
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+    left = 18 * mm
+    top = page_height - 18 * mm
+    line_height = 6.4 * mm
+    y = top
+
+    def draw_line(text, size=11, bold=False):
+        nonlocal y
+        if y < 18 * mm:
+            pdf.showPage()
+            y = top
+        pdf.setFont(font_name, size)
+        pdf.drawString(left, y, str(text))
+        y -= line_height if not bold else line_height + 1.5 * mm
+
+    draw_line("รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)", 16, True)
+    draw_line(f"เลขที่ระบบ {record.get('id', '-')}", 11)
+    y -= 2 * mm
+
+    for line in wrap_text_for_report(build_bt27_report_text(record), width=95)[2:]:
+        if line in (
+            "1-10 รายการทั่วไป",
+            "11-19 รายละเอียดเกี่ยวกับราง",
+            "20-22 รายละเอียดเกี่ยวกับทางและเหล็กประกบราง",
+            "23-28 รายละเอียดเกี่ยวกับรางชำรุด หัก แตกร้าว",
+            "พิกัด/หมายเหตุ/การดำเนินการ",
+            "ข้อมูลผู้รายงาน",
+        ):
+            draw_line(line, 13, True)
+        else:
+            draw_line(line, 10.5)
+
+    pdf.save()
+    return buffer.getvalue()
+
+def build_bt27_image_bytes(record, image_format='PNG'):
+    if not PIL_AVAILABLE:
+        return None
+
+    font_path = get_thai_font_path()
+    if font_path:
+        title_font = ImageFont.truetype(font_path, 34)
+        body_font = ImageFont.truetype(font_path, 22)
+    else:
+        title_font = ImageFont.load_default()
+        body_font = ImageFont.load_default()
+
+    wrapped_lines = wrap_text_for_report(build_bt27_report_text(record), width=78)
+    width = 1600
+    padding = 72
+    line_height = 36
+    title_height = 62
+    height = padding * 2 + title_height + (len(wrapped_lines) * line_height)
+    bg = 'white'
+    image = Image.new('RGB', (width, max(height, 900)), bg)
+    draw = ImageDraw.Draw(image)
+
+    draw.rectangle((0, 0, width, 110), fill=(15, 47, 95))
+    draw.text((padding, 30), "รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)", font=title_font, fill='white')
+    y = 140
+    for line in wrapped_lines[2:]:
+        fill = (17, 24, 39)
+        if line in (
+            "1-10 รายการทั่วไป",
+            "11-19 รายละเอียดเกี่ยวกับราง",
+            "20-22 รายละเอียดเกี่ยวกับทางและเหล็กประกบราง",
+            "23-28 รายละเอียดเกี่ยวกับรางชำรุด หัก แตกร้าว",
+            "พิกัด/หมายเหตุ/การดำเนินการ",
+            "ข้อมูลผู้รายงาน",
+        ):
+            draw.text((padding, y), line, font=body_font, fill=(29, 78, 216))
+        else:
+            draw.text((padding, y), line, font=body_font, fill=fill)
+        y += line_height
+
+    buffer = BytesIO()
+    if image_format.upper() == 'JPEG':
+        image.save(buffer, format='JPEG', quality=92)
+    else:
+        image.save(buffer, format='PNG')
+    return buffer.getvalue()
+
 def save_report_files(record):
     report_dir = APP_DIR / 'data' / 'reports'
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -521,16 +719,32 @@ def save_report_files(record):
     txt_content = build_bt27_report_text(record)
     html_content = build_bt27_report_html(record)
     json_content = json.dumps(record, ensure_ascii=False, indent=2)
+    docx_content = build_bt27_docx_bytes(record)
+    pdf_content = build_bt27_pdf_bytes(record)
+    png_content = build_bt27_image_bytes(record, 'PNG')
+    jpg_content = build_bt27_image_bytes(record, 'JPEG')
 
     (report_dir / f"{stem}.txt").write_text(txt_content, encoding='utf-8')
     (report_dir / f"{stem}.html").write_text(html_content, encoding='utf-8')
     (report_dir / f"{stem}.json").write_text(json_content, encoding='utf-8')
+    if docx_content:
+        (report_dir / f"{stem}.docx").write_bytes(docx_content)
+    if pdf_content:
+        (report_dir / f"{stem}.pdf").write_bytes(pdf_content)
+    if png_content:
+        (report_dir / f"{stem}.png").write_bytes(png_content)
+    if jpg_content:
+        (report_dir / f"{stem}.jpg").write_bytes(jpg_content)
 
     return {
         'id': record.get('id', ''),
         'txt': txt_content,
         'html': html_content,
         'json': json_content,
+        'docx': docx_content,
+        'pdf': pdf_content,
+        'png': png_content,
+        'jpg': jpg_content,
         'stem': stem,
     }
 
@@ -539,28 +753,50 @@ def render_report_downloads(report_data, show_message=True):
         return
     if show_message:
         st.success(f"สร้างไฟล์รายงาน บท.27 เรียบร้อย: {report_data.get('id', '')}")
-    d1, d2, d3 = st.columns(3)
-    d1.download_button(
-        "ดาวน์โหลดรายงาน TXT",
-        data=report_data['txt'].encode('utf-8-sig'),
-        file_name=f"{report_data['stem']}_BT27.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-    d2.download_button(
-        "ดาวน์โหลดรายงาน HTML",
-        data=report_data['html'].encode('utf-8'),
-        file_name=f"{report_data['stem']}_BT27.html",
-        mime="text/html",
-        use_container_width=True,
-    )
-    d3.download_button(
-        "ดาวน์โหลดข้อมูล JSON",
-        data=report_data['json'].encode('utf-8'),
-        file_name=f"{report_data['stem']}_BT27.json",
-        mime="application/json",
-        use_container_width=True,
-    )
+    d1, d2, d3, d4 = st.columns(4)
+    if report_data.get('docx'):
+        d1.download_button(
+            "ดาวน์โหลด DOCX",
+            data=report_data['docx'],
+            file_name=f"{report_data['stem']}_BT27.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+    else:
+        d1.info("DOCX: ต้องติดตั้ง python-docx")
+
+    if report_data.get('pdf'):
+        d2.download_button(
+            "ดาวน์โหลด PDF",
+            data=report_data['pdf'],
+            file_name=f"{report_data['stem']}_BT27.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    else:
+        d2.info("PDF: ต้องติดตั้ง reportlab")
+
+    if report_data.get('png'):
+        d3.download_button(
+            "ดาวน์โหลด PNG",
+            data=report_data['png'],
+            file_name=f"{report_data['stem']}_BT27.png",
+            mime="image/png",
+            use_container_width=True,
+        )
+    else:
+        d3.info("PNG: ต้องติดตั้ง Pillow")
+
+    if report_data.get('jpg'):
+        d4.download_button(
+            "ดาวน์โหลด JPG",
+            data=report_data['jpg'],
+            file_name=f"{report_data['stem']}_BT27.jpg",
+            mime="image/jpeg",
+            use_container_width=True,
+        )
+    else:
+        d4.info("JPG: ต้องติดตั้ง Pillow")
 
 # ---- หน่วยงานจากไฟล์ Excel ----
 DEPARTMENTS = [
