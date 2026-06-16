@@ -7,6 +7,10 @@ import streamlit as st
 from datetime import datetime
 import json
 import os
+import sys
+import subprocess
+import importlib
+import importlib.util
 from pathlib import Path
 import random
 import csv
@@ -19,6 +23,24 @@ import urllib.request
 from io import BytesIO, StringIO
 import pandas as pd
 
+AUTO_INSTALL_NOTES = []
+
+def ensure_runtime_package(import_name, pip_name=None):
+    pip_name = pip_name or import_name
+    if importlib.util.find_spec(import_name) is not None:
+        return True
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", pip_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        AUTO_INSTALL_NOTES.append(f"ติดตั้ง {pip_name} อัตโนมัติแล้ว")
+        return importlib.util.find_spec(import_name) is not None
+    except Exception:
+        AUTO_INSTALL_NOTES.append(f"ยังไม่พบ {pip_name} กรุณาตรวจสอบ requirements.txt หรือ Streamlit Secrets/Deploy settings")
+        return False
+
 try:
     import plotly.express as px
     import plotly.graph_objects as go
@@ -28,6 +50,7 @@ except ModuleNotFoundError:
     go = None
     PLOTLY_AVAILABLE = False
 
+ensure_runtime_package("docx", "python-docx")
 try:
     from docx import Document
     from docx.shared import Pt
@@ -37,6 +60,7 @@ except ModuleNotFoundError:
     Pt = None
     DOCX_AVAILABLE = False
 
+ensure_runtime_package("reportlab", "reportlab")
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -52,6 +76,7 @@ except ModuleNotFoundError:
     canvas = None
     REPORTLAB_AVAILABLE = False
 
+ensure_runtime_package("PIL", "Pillow")
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
@@ -763,7 +788,7 @@ def render_report_downloads(report_data, show_message=True):
             use_container_width=True,
         )
     else:
-        d1.info("DOCX: ต้องติดตั้ง python-docx")
+        d1.error("DOCX ยังสร้างไม่ได้: ต้องมี python-docx ใน requirements.txt")
 
     if report_data.get('pdf'):
         d2.download_button(
@@ -774,7 +799,7 @@ def render_report_downloads(report_data, show_message=True):
             use_container_width=True,
         )
     else:
-        d2.info("PDF: ต้องติดตั้ง reportlab")
+        d2.error("PDF ยังสร้างไม่ได้: ต้องมี reportlab ใน requirements.txt")
 
     if report_data.get('png'):
         d3.download_button(
@@ -785,7 +810,7 @@ def render_report_downloads(report_data, show_message=True):
             use_container_width=True,
         )
     else:
-        d3.info("PNG: ต้องติดตั้ง Pillow")
+        d3.error("PNG ยังสร้างไม่ได้: ต้องมี Pillow ใน requirements.txt")
 
     if report_data.get('jpg'):
         d4.download_button(
@@ -796,7 +821,7 @@ def render_report_downloads(report_data, show_message=True):
             use_container_width=True,
         )
     else:
-        d4.info("JPG: ต้องติดตั้ง Pillow")
+        d4.error("JPG ยังสร้างไม่ได้: ต้องมี Pillow ใน requirements.txt")
 
 # ---- หน่วยงานจากไฟล์ Excel ----
 DEPARTMENTS = [
@@ -1151,6 +1176,10 @@ with st.sidebar:
                 'GITHUB_DATA_PATH = "data/rail_damage_records.json"',
                 language="toml"
             )
+    if AUTO_INSTALL_NOTES:
+        with st.expander("สถานะแพ็กเกจสร้างรายงาน"):
+            for note in AUTO_INSTALL_NOTES:
+                st.caption(note)
 
 # Topbar
 st.markdown("""
