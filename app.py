@@ -11,6 +11,7 @@ from pathlib import Path
 import random
 import csv
 import base64
+import html
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -399,6 +400,168 @@ def parse_time_value(value):
         except Exception:
             return datetime.now().time()
 
+def build_bt27_report_text(record):
+    fd = record.get('formDetails', {})
+    head_damage = ', '.join(fd.get('headDamage', [])) if fd.get('headDamage') else '-'
+    attachments = fd.get('attachments', [])
+
+    lines = [
+        "รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)",
+        "=" * 58,
+        f"เลขที่รายงาน: {fd.get('reportNo') or record.get('id', '-')}",
+        f"เลขที่ระบบ: {record.get('id', '-')}",
+        f"วันที่/เวลา: {record.get('date', '-')} เวลา {record.get('time', '-')}",
+        f"สถานะรายงาน: {fd.get('reportStatus', '-')}",
+        f"ได้เปลี่ยนแล้วเสร็จเมื่อ: {fd.get('completedReplaceAt', '-')}",
+        "",
+        "1-10 รายการทั่วไป",
+        f"สายทาง: {record.get('line', '-')}",
+        f"ประเภททาง: {fd.get('mainBranch', '-')}",
+        f"ชั้นของทาง: {fd.get('trackClass', '-')}",
+        f"ชนิดของทาง: {fd.get('trackDirection', '-')}",
+        f"ลักษณะการเดินรถ: {fd.get('serviceTrack', '-')}",
+        f"ชนิดแรงขับ: {fd.get('traction', '-')}",
+        f"ระหว่างสถานี: {fd.get('stationFrom', '-')} - {fd.get('stationTo', '-')}",
+        f"สถานีใกล้เคียง/ช่วงสถานี: {record.get('station', '-')}",
+        f"กม.: {record.get('km', '-')}",
+        f"ลักษณะทาง: {fd.get('alignment', '-')} | รัศมี/รายละเอียด: {fd.get('curveRadius', '-')}",
+        f"สภาพทาง: {fd.get('wetDry', '-')}",
+        f"ระดับความลาดชัน: {fd.get('grade', '-')}",
+        f"จุดรถล้อหล่อ/เคลื่อนขบวน: {fd.get('wheelFlatRemark', '-')}",
+        f"จำนวนขบวน/24 ชม.: ผู้โดยสาร {fd.get('trainPassenger24h', 0)} | สินค้า {fd.get('trainFreight24h', 0)} | รวม {fd.get('trainTotal24h', 0)}",
+        f"ความเร็วสูงสุดที่อนุญาต: {fd.get('speedLimit', '-')}",
+        "",
+        "11-19 รายละเอียดเกี่ยวกับราง",
+        f"ขนาด/น้ำหนักราง: {fd.get('railSize', '-')}",
+        f"ความยาวราง: {fd.get('railLength', '-')}",
+        f"รางเชื่อมยาว: {fd.get('cwrLength', '-')}",
+        f"ชนิดของรางที่หัก: {fd.get('brokenRailType', '-')}",
+        f"เคยกลับ/เปลี่ยนข้างราง: {fd.get('railSideHistory', '-')}",
+        f"น้ำหนักรางเมื่อหัก: {fd.get('railWeightAtBreak', '-')}",
+        f"น้ำหนักที่หายไป: {fd.get('railWeightLoss', '-')}",
+        f"เครื่องหมายราง: {fd.get('railMark', record.get('railId', '-'))}",
+        f"วางรางเมื่อ: {fd.get('railLaidDate', '-')}",
+        f"สภาพรางเดิม: {fd.get('railCondition', '-')}",
+        f"วิธีเชื่อมใกล้จุดหัก: {fd.get('weldMethod', '-')}",
+        f"เชื่อมครั้งสุดท้าย: {fd.get('weldLastDate', '-')}",
+        f"จำนวนครั้งที่ซ่อม: {fd.get('weldRepairCount', '-')}",
+        f"หินโรยทาง: {fd.get('ballast', '-')}",
+        f"วาระการอัดหิน: {fd.get('tampingFrequency', '-')}",
+        "",
+        "20-22 รายละเอียดเกี่ยวกับทางและเหล็กประกบราง",
+        f"การตัด/เปลี่ยนราง: {fd.get('jointCutMethod', '-')}",
+        f"สภาพผิวสัมผัสเหล็กประกบ: {fd.get('jointContactCondition', '-')}",
+        f"รูสลักเกลียวต่อราง: {fd.get('boltHole', '-')}",
+        f"ชนิดเหล็กประกบราง: {fd.get('fishplateType', '-')}",
+        f"สภาพเหล็กประกบราง: {fd.get('fishplateCondition', '-')}",
+        f"ชนิดและสภาพหมอน: {fd.get('sleeperCondition', '-')}",
+        f"ประวัติรางหักในระยะใกล้เคียง: {fd.get('nearbyBreakRecord', '-')}",
+        "",
+        "23-28 รายละเอียดเกี่ยวกับรางชำรุด หัก แตกร้าว",
+        f"ประเภทเหตุ: {record.get('type', '-')}",
+        f"ระดับความรุนแรง: {SEVERITY_MAP.get(record.get('severity'), record.get('severity', '-'))}",
+        f"ความยาว/ขนาดชำรุด: {record.get('length', '-')}",
+        f"ตรวจพบโดย: {fd.get('foundBy', '-')}",
+        f"ตำแหน่งที่พบ: {fd.get('foundPosition', '-')}",
+        f"ขณะตรวจพบ: {fd.get('foundContext', '-')}",
+        f"อุณหภูมิขณะพบ: {fd.get('railTemperature', '-')}",
+        f"ลักษณะรอยร้าว: {fd.get('crackAge', '-')}",
+        f"มีรอยล้อกระแทก: {fd.get('wheelImpact', '-')}",
+        f"รางที่นำมาเปลี่ยน: ขนาด {fd.get('replacementRailSize', '-')} | ยาว {fd.get('replacementRailLength', '-')} | ประเภท {fd.get('replacementRailType', '-')}",
+        f"การชำรุดเสียหายบริเวณหัวราง: {head_damage}",
+        f"อื่นๆ: {fd.get('headDamageOther', '-')}",
+        "",
+        "พิกัด/หมายเหตุ/การดำเนินการ",
+        f"พิกัด: {record.get('lat', '-')} , {record.get('lon', '-')}",
+        f"หมายเหตุ: {fd.get('note', '-')}",
+        f"การดำเนินการเบื้องต้น: {record.get('action', '-')}",
+        f"ไฟล์แนบ: {len(attachments)} ไฟล์",
+        "",
+        "ข้อมูลผู้รายงาน",
+        f"ผู้รายงาน: {record.get('reporter', '-')}",
+        f"ตำแหน่ง: {record.get('position', '-')}",
+        f"หน่วยงาน/เขต: {record.get('dept', '-')}",
+        f"เบอร์โทรศัพท์: {record.get('phone', '-')}",
+        f"วิศวกร/ผู้รับรอง: {fd.get('certifier', '-')}",
+        "",
+        f"สร้างรายงานเมื่อ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+    ]
+    return "\n".join(lines)
+
+def build_bt27_report_html(record):
+    report_text = build_bt27_report_text(record)
+    escaped = html.escape(report_text)
+    return f"""<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <title>รายงาน บท.27 {html.escape(record.get('id', ''))}</title>
+  <style>
+    body {{ font-family: Tahoma, Arial, sans-serif; margin: 32px; color: #111827; }}
+    .sheet {{ max-width: 960px; margin: auto; }}
+    h1 {{ font-size: 22px; text-align: center; margin-bottom: 4px; }}
+    .meta {{ text-align: center; color: #4b5563; margin-bottom: 24px; }}
+    pre {{ white-space: pre-wrap; font-family: Tahoma, Arial, sans-serif; line-height: 1.65; font-size: 14px; }}
+    @media print {{ body {{ margin: 12mm; }} }}
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <h1>รายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)</h1>
+    <div class="meta">เลขที่ระบบ {html.escape(record.get('id', '-'))}</div>
+    <pre>{escaped}</pre>
+  </div>
+</body>
+</html>"""
+
+def save_report_files(record):
+    report_dir = APP_DIR / 'data' / 'reports'
+    report_dir.mkdir(parents=True, exist_ok=True)
+    stem = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in record.get('id', 'report'))
+    txt_content = build_bt27_report_text(record)
+    html_content = build_bt27_report_html(record)
+    json_content = json.dumps(record, ensure_ascii=False, indent=2)
+
+    (report_dir / f"{stem}.txt").write_text(txt_content, encoding='utf-8')
+    (report_dir / f"{stem}.html").write_text(html_content, encoding='utf-8')
+    (report_dir / f"{stem}.json").write_text(json_content, encoding='utf-8')
+
+    return {
+        'id': record.get('id', ''),
+        'txt': txt_content,
+        'html': html_content,
+        'json': json_content,
+        'stem': stem,
+    }
+
+def render_report_downloads(report_data, show_message=True):
+    if not report_data:
+        return
+    if show_message:
+        st.success(f"สร้างไฟล์รายงาน บท.27 เรียบร้อย: {report_data.get('id', '')}")
+    d1, d2, d3 = st.columns(3)
+    d1.download_button(
+        "ดาวน์โหลดรายงาน TXT",
+        data=report_data['txt'].encode('utf-8-sig'),
+        file_name=f"{report_data['stem']}_BT27.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+    d2.download_button(
+        "ดาวน์โหลดรายงาน HTML",
+        data=report_data['html'].encode('utf-8'),
+        file_name=f"{report_data['stem']}_BT27.html",
+        mime="text/html",
+        use_container_width=True,
+    )
+    d3.download_button(
+        "ดาวน์โหลดข้อมูล JSON",
+        data=report_data['json'].encode('utf-8'),
+        file_name=f"{report_data['stem']}_BT27.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+
 # ---- หน่วยงานจากไฟล์ Excel ----
 DEPARTMENTS = [
     "ศูนย์อาคารและสถานที่",
@@ -718,15 +881,16 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     st.markdown("---")
+    st.markdown("### เมนูหลัก")
     menu = st.radio(
-        "เมนู",
+        "เลือกเมนู",
         ["📝 แจ้งความเสียหาย", "📋 รายการแจ้งเหตุ", "📊 แดชบอร์ดสถิติ"],
         label_visibility="collapsed"
     )
     st.markdown("---")
     st.markdown(f"""
     <div style='font-size:12px; opacity:0.6; text-align:center;'>
-        เวอร์ชัน 2.4.0<br>
+        เวอร์ชัน 2.5.0<br>
         อัปเดต: {datetime.now().strftime('%d/%m/%Y')}
         <div class="sidebar-credit">
             จัดทำโดย<br>
@@ -742,6 +906,15 @@ with st.sidebar:
         {sync_note}
     </div>
     """, unsafe_allow_html=True)
+    if not github_storage_enabled():
+        with st.expander("ตั้งค่า GITHUB_REPO"):
+            st.code(
+                'GITHUB_REPO = "your-user/your-repo"\n'
+                'GITHUB_TOKEN = "github_pat_xxxxxxxxx"\n'
+                'GITHUB_BRANCH = "main"\n'
+                'GITHUB_DATA_PATH = "data/rail_damage_records.json"',
+                language="toml"
+            )
 
 # Topbar
 st.markdown("""
@@ -1117,8 +1290,11 @@ if menu == "📝 แจ้งความเสียหาย":
                 }
                 records.append(new_record)
                 save_records(records)
+                st.session_state['latest_report_download'] = save_report_files(new_record)
                 st.success(f"บันทึกรายงานสำเร็จ! รหัสเอกสาร: **{new_record['id']}**")
                 st.balloons()
+
+    render_report_downloads(st.session_state.get('latest_report_download'))
 
 
 # ================================================================
@@ -1217,6 +1393,8 @@ elif menu == "📋 รายการแจ้งเหตุ":
                             attachments = fd.get('attachments', [])
                             if attachments:
                                 st.markdown(f"**ไฟล์แนบ:** {len(attachments)} ไฟล์")
+                    st.markdown("---")
+                    render_report_downloads(save_report_files(r), show_message=False)
 
                 with edit_tab:
                     line_options = ["-- เลือกสายทาง --"] + RAILWAY_LINES
