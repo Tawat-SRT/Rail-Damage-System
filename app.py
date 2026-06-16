@@ -3,7 +3,6 @@ Rail Damage Reporting System - Flask Application
 ระบบรายงานรางชำรุดหักแตกร้าว
 """
 
-from flask import Flask, render_template, request, jsonify
 from datetime import datetime
 import json
 import os
