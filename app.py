@@ -1,856 +1,942 @@
 """
-Rail Damage Reporting System - Streamlit Application
-ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)
-
-Run with:
-streamlit run rail_damage_reporting_system_v2.py
+Rail Damage Reporting System - Streamlit Application (Enhanced)
+ระบบรายงานรางชำรุดหักแตกร้าว
 """
 
-from __future__ import annotations
-
-import csv
+import streamlit as st
+from datetime import datetime
 import json
 import os
-import random
-import re
-from datetime import datetime
-from io import StringIO
 from pathlib import Path
-from typing import Any
-
+import random
+import csv
+from io import StringIO
 import pandas as pd
-import streamlit as st
+import folium
+from streamlit_folium import st_folium
+import plotly.express as px
+import plotly.graph_objects as go
 
-try:
-    import pydeck as pdk
-except Exception:  # pragma: no cover - fallback for minimal Streamlit installs
-    pdk = None
-
-
-BASE_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-DATA_DIR = BASE_DIR / "data"
-UPLOAD_DIR = DATA_DIR / "uploads"
-DATA_FILE = DATA_DIR / "rail_damage_records.json"
-
-DATA_DIR.mkdir(exist_ok=True)
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
+# ----------------- 1. Page Config -----------------
 st.set_page_config(
-    page_title="ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)",
+    page_title="ระบบรายงานรางชำรุดหักแตกร้าว",
+    page_icon="🛤️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
-
-st.markdown(
-    """
+# ----------------- 2. Custom CSS -----------------
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap');
+    @import url('[fonts.googleapis.com](https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap)');
 
-:root {
-    --navy: #0b2341;
-    --navy-2: #123a64;
-    --maroon: #7a0019;
-    --cream: #f7f1e6;
-    --ink: #172033;
-    --muted: #667085;
-    --line: #e6eaf0;
-    --surface: #ffffff;
-    --soft: #f5f7fb;
-}
+    html, body, [class*="css"] {
+        font-family: 'Sarabun', sans-serif !important;
+    }
+    .stApp {
+        background: linear-gradient(135deg, #e8edf5 0%, #f0f4f8 100%);
+    }
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1a3a6b 0%, #1e4d9e 100%);
+        border-right: none;
+    }
+    [data-testid="stSidebar"] * {
+        color: white !important;
+    }
+    [data-testid="stSidebar"] .stRadio label {
+        color: white !important;
+        font-size: 15px;
+    }
+    [data-testid="stSidebar"] hr {
+        border-color: rgba(255,255,255,0.2);
+    }
 
-html, body, [class*="css"] {
-    font-family: 'Sarabun', sans-serif !important;
-}
+    /* Topbar */
+    .topbar-header {
+        background: linear-gradient(135deg, #1a3a6b 0%, #2563eb 100%);
+        color: white;
+        padding: 20px 28px;
+        border-radius: 16px;
+        margin-bottom: 28px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        box-shadow: 0 8px 24px rgba(26,58,107,0.25);
+    }
+    .topbar-title {
+        font-size: 24px;
+        font-weight: 800;
+        margin: 0;
+        line-height: 1.2;
+        letter-spacing: 0.3px;
+    }
+    .topbar-sub {
+        font-size: 13px;
+        opacity: 0.75;
+        font-weight: 400;
+        margin-top: 3px;
+    }
+    .topbar-icon {
+        font-size: 36px;
+        background: rgba(255,255,255,0.15);
+        padding: 12px;
+        border-radius: 12px;
+    }
 
-.stApp {
-    background:
-        radial-gradient(circle at top left, rgba(122, 0, 25, 0.08), transparent 28rem),
-        linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
-    color: var(--ink);
-}
+    /* Section header */
+    .section-header {
+        background: white;
+        border-left: 5px solid #2563eb;
+        padding: 12px 18px;
+        border-radius: 0 10px 10px 0;
+        margin: 20px 0 16px 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .section-header h4 {
+        margin: 0;
+        color: #1a3a6b;
+        font-weight: 700;
+        font-size: 16px;
+    }
 
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
-    border-right: 1px solid var(--line);
-}
+    /* Metrics */
+    [data-testid="stMetric"] {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        border-top: 4px solid #2563eb;
+        transition: transform 0.2s;
+    }
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 13px !important;
+        color: #64748b !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 32px !important;
+        color: #1a3a6b !important;
+        font-weight: 800 !important;
+    }
 
-[data-testid="stSidebar"] [role="radiogroup"] label {
-    border-radius: 10px;
-    padding: 8px 10px;
-    margin-bottom: 4px;
-}
+    /* Form */
+    [data-testid="stForm"] {
+        background: white;
+        border-radius: 16px;
+        padding: 28px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+        border: 1px solid #e2e8f0;
+    }
 
-.hero {
-    position: relative;
-    overflow: hidden;
-    padding: 24px 28px;
-    border-radius: 18px;
-    color: #fff;
-    background:
-        linear-gradient(135deg, rgba(11, 35, 65, 0.98), rgba(18, 58, 100, 0.92)),
-        repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0, rgba(255,255,255,0.07) 1px, transparent 1px, transparent 42px);
-    box-shadow: 0 18px 42px rgba(11, 35, 65, 0.22);
-    margin-bottom: 22px;
-}
+    /* Expander */
+    [data-testid="stExpander"] {
+        background: white;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        margin-bottom: 10px;
+    }
 
-.hero:after {
-    content: "";
-    position: absolute;
-    right: -90px;
-    top: -90px;
-    width: 280px;
-    height: 280px;
-    border-radius: 50%;
-    border: 36px solid rgba(247, 241, 230, 0.12);
-}
+    /* Buttons */
+    .stButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+        font-family: 'Sarabun', sans-serif !important;
+        padding: 8px 18px;
+        transition: all 0.2s;
+    }
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(37,99,235,0.3);
+    }
+    div[data-testid="stFormSubmitButton"] > button {
+        background: linear-gradient(135deg, #1a3a6b, #2563eb);
+        color: white;
+        border: none;
+        width: 100%;
+        padding: 12px;
+        font-size: 16px;
+        border-radius: 10px;
+    }
 
-.hero-kicker {
-    font-size: 13px;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    color: #f0d8b6;
-    font-weight: 700;
-    margin-bottom: 6px;
-}
+    /* Inputs */
+    .stTextInput input, .stSelectbox select, .stTextArea textarea {
+        border-radius: 8px !important;
+        border: 1.5px solid #e2e8f0 !important;
+        font-family: 'Sarabun', sans-serif !important;
+    }
+    .stTextInput input:focus, .stSelectbox select:focus {
+        border-color: #2563eb !important;
+        box-shadow: 0 0 0 3px rgba(37,99,235,0.1) !important;
+    }
 
-.hero-title {
-    font-size: 30px;
-    line-height: 1.18;
-    font-weight: 800;
-    margin: 0 0 4px 0;
-}
+    /* Badge */
+    .badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .badge-high { background: #fee2e2; color: #dc2626; }
+    .badge-med  { background: #fef3c7; color: #d97706; }
+    .badge-low  { background: #dcfce7; color: #16a34a; }
 
-.hero-subtitle {
-    font-size: 15px;
-    color: rgba(255,255,255,0.78);
-    max-width: 760px;
-}
+    .info-card {
+        background: white;
+        border-radius: 14px;
+        padding: 20px 24px;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.07);
+        margin-bottom: 16px;
+        border: 1px solid #f1f5f9;
+    }
 
-.hero-producer {
-    margin-top: 12px;
-    display: inline-flex;
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: rgba(247, 241, 230, 0.12);
-    color: #f7f1e6;
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.section-title {
-    font-size: 18px;
-    font-weight: 800;
-    color: var(--navy);
-    margin: 18px 0 10px;
-    padding-left: 12px;
-    border-left: 4px solid var(--maroon);
-}
-
-.soft-note {
-    color: var(--muted);
-    font-size: 13px;
-    margin-top: -4px;
-    margin-bottom: 12px;
-}
-
-[data-testid="stMetric"] {
-    background: var(--surface);
-    border: 1px solid rgba(11, 35, 65, 0.08);
-    border-radius: 14px;
-    padding: 16px 18px;
-    box-shadow: 0 10px 26px rgba(17, 24, 39, 0.07);
-}
-
-[data-testid="stMetric"] label {
-    color: var(--muted) !important;
-}
-
-[data-testid="stMetricValue"] {
-    color: var(--navy);
-    font-weight: 800;
-}
-
-[data-testid="stForm"] {
-    background: rgba(255,255,255,0.84);
-    border: 1px solid rgba(11, 35, 65, 0.08);
-    border-radius: 18px;
-    padding: 22px 24px;
-    box-shadow: 0 12px 34px rgba(17, 24, 39, 0.08);
-}
-
-.stButton > button, .stDownloadButton > button {
-    border-radius: 10px;
-    border: 0;
-    font-weight: 700;
-    min-height: 42px;
-}
-
-.stButton > button[kind="primary"], .stFormSubmitButton > button {
-    background: linear-gradient(135deg, var(--maroon), #a31632);
-    color: #fff;
-}
-
-.status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 700;
-    background: #eef2ff;
-    color: #193a70;
-}
-
-.legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin: 8px 0 12px;
-}
-
-.legend-item {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 13px;
-    color: var(--muted);
-}
-
-.dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    display: inline-block;
-}
-
-.empty-panel {
-    border: 1px dashed #bcc7d6;
-    border-radius: 16px;
-    padding: 24px;
-    background: rgba(255,255,255,0.72);
-    color: var(--muted);
-    text-align: center;
-}
+    /* Sidebar logo area */
+    .sidebar-logo {
+        text-align: center;
+        padding: 10px 0 16px 0;
+    }
+    .sidebar-brand {
+        font-size: 14px;
+        font-weight: 700;
+        color: white;
+        margin-top: 8px;
+        opacity: 0.9;
+    }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
+# ----------------- 3. Data / Constants -----------------
+DATA_FILE = 'data/rail_damage_records.json'
+Path('data').mkdir(exist_ok=True)
 
-LINES = [
-    "สายเหนือ",
-    "สายตะวันออกเฉียงเหนือ",
-    "สายตะวันออก",
-    "สายใต้",
-    "สายแม่กลอง",
-    "ทางคู่/ทางแยก",
-]
+def load_records():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
+    return []
 
-TRACK_CLASS = ["ชั้น 1", "ชั้น 2", "ชั้น 3", "ทางหลีก", "ทางประธาน", "ทางแยก"]
-TRACK_DIRECTION = ["ทางขึ้น", "ทางล่อง", "ทางเดี่ยว", "ทางคู่", "ทางหลีก"]
-TRAFFIC_TYPE = ["โดยสาร/สินค้า", "โดยสาร", "สินค้า", "รถบำรุงทาง", "อื่นๆ"]
-ALIGNMENT_OPTIONS = ["ทางตรง", "ทางโค้ง", "ย่านสถานี", "บนสะพาน", "บริเวณประแจ", "อื่นๆ"]
-SLOPE_OPTIONS = ["ระดับ", "ลาดขึ้น", "ลาดลง"]
-WET_OPTIONS = ["แห้ง", "เปียก", "มีน้ำขัง", "โคลน/ดินอ่อน", "อื่นๆ"]
-RAIL_KIND = ["รางธรรมดา", "รางลิ้น", "รางสับประแจ", "รางแม่คู่", "รางปีก", "รางเชื่อมยาว", "อื่นๆ"]
-YES_NO = ["ไม่ระบุ", "ใช่", "ไม่ใช่"]
+def save_records(records):
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
 
-DAMAGE_GROUPS = ["รางหัก", "รางชำรุด", "รางแตกร้าว"]
-DAMAGE_TYPES = [
-    "Spalling (รอยหลุดร่อน)",
-    "Squat (รอยหมอน)",
-    "Corrugation (คลื่นรางเป็นลอน)",
-    "Flaking / Gauge Corner Cracking (การแตกมุมรางด้านใน)",
-    "Wheel Burn (ล้อกัด)",
-    "Belgrospi (ขุมสนิม)",
-    "Shelling (การแตกมุมรางด้านใน)",
-    "Head Check (การแตกเป็นเส้น)",
-    "Transverse crack (รอยแตกขวาง)",
-    "Longitudinal crack (รอยแตกตามยาว)",
-    "Defective weld (รอยเชื่อมชำรุด)",
-    "Rail break (รางหัก)",
-    "อื่นๆ",
-]
-DAMAGE_LOCATION = ["หัวราง", "เอวราง", "ฐานราง", "รอยเชื่อม", "ปลายราง", "ประแจ", "อื่นๆ"]
-REPAIR_ACTIONS = [
-    "จำกัดความเร็ว",
-    "ตีปะคับ/ใส่แคล้มป์",
-    "ตัดต่อราง",
-    "เปลี่ยนราง",
-    "เชื่อมซ่อม",
-    "อัดหิน/ปรับระดับทาง",
-    "ติดตามเฝ้าระวัง",
-    "อื่นๆ",
-]
-
-SEVERITY_MAP = {
-    "low": "ต่ำ - เฝ้าระวัง",
-    "medium": "ปานกลาง - ซ่อมตามแผน",
-    "high": "สูง - เร่งซ่อม",
-    "critical": "วิกฤต - ต้องควบคุมการเดินรถทันที",
-}
-STATUS_MAP = {
-    "pending": "รอตรวจสอบ",
-    "in_progress": "กำลังซ่อมแซม",
-    "monitoring": "ซ่อมชั่วคราว/เฝ้าระวัง",
-    "done": "ซ่อมแซมแล้ว",
-}
-
-COLOR_BY_DAMAGE = {
-    "รางหัก": [122, 0, 25, 205],
-    "รางชำรุด": [224, 130, 0, 200],
-    "รางแตกร้าว": [15, 76, 129, 200],
-}
-
-
-def load_records() -> list[dict[str, Any]]:
-    if not DATA_FILE.exists():
-        return []
-    try:
-        return json.loads(DATA_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-
-
-def save_records(records: list[dict[str, Any]]) -> None:
-    DATA_FILE.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def generate_id(records: list[dict[str, Any]]) -> str:
+def generate_id():
+    records = load_records()
     year = datetime.now().year
     num = len(records) + 1
-    suffix = "".join(chr(random.randint(65, 90)) for _ in range(3))
-    return f"RPT-{year}-{num:04d}-{suffix}"
+    suffix = ''.join([chr(random.randint(65, 90)) for _ in range(3)])
+    return f'RPT-{year}-{num:04d}-{suffix}'
 
+# ---- หน่วยงานจากไฟล์ Excel ----
+DEPARTMENTS = [
+    "ศูนย์อาคารและสถานที่",
+    "กองบำรุงอาคารสถานที่เขตกรุงเทพ",
+    "พสถ.กรุงเทพ", "พสถ.มักกะสัน", "พสถ.หัวตะเข้",
+    "งานสถานที่บางซื่อ", "พสถ.บางซื่อ", "พสถ.ธนบุรี", "พสถ.กม.๑๑",
+    "ศูนย์บำรุงทางภาคกลาง",
+    "งานเครื่องกลบำรุงทางหนักกรุงเทพ",
+    "กองบำรุงทางเขตกรุงเทพ",
+    "แขวงบำรุงทางกรุงเทพ",
+    "นตท.กรุงเทพ", "นตท.มักกะสัน", "นตท.หัวหมาก", "นตท.ลาดกระบัง",
+    "นตท.หัวตะเข้", "นตท.สมุทรสาคร",
+    "แขวงบำรุงทางบางซื่อ",
+    "นตท.บางซื่อ", "นตท.กรุงเทพอภิวัฒน์", "นตท.ธนบุรี",
+    "นตท.ศาลายา", "นตท.ย่านพหลโยธิน",
+    "แขวงบำรุงทางนครปฐม",
+    "นตท.นครชัยศรี", "นตท.นครปฐม", "นตท.บ้านโป่ง",
+    "นตท.ยางประสาท", "นตท.สุพรรณบุรี", "พสถ.นครปฐม",
+    "กองบำรุงทางเขตฉะเชิงเทรา",
+    "แขวงบำรุงทางฉะเชิงเทรา",
+    "นตท.เปรง", "นตท.ฉะเชิงเทรา", "นตท.ดอนสีนนท์", "นตท.ชลบุรี",
+    "พสถ.ฉะเชิงเทรา",
+    "แขวงบำรุงทางปราจีนบุรี",
+    "นตท.คลองสิบเก้า", "นตท.ปราจีนบุรี", "นตท.องครักษ์",
+    "นตท.วิหารแดง", "นตท.บ้านไผ่นาบุญ", "พสถ.ปราจีนบุรี",
+    "แขวงบำรุงทางวัฒนานคร",
+    "นตท.ประจันตคาม", "นตท.กบินทร์บุรี", "นตท.สระแก้ว",
+    "นตท.วัฒนานคร", "นตท.อรัญประเทศ", "พสถ.อรัญประเทศ",
+    "แขวงบำรุงทางศรีราชา",
+    "นตท.บางพระ", "นตท.ศรีราชา", "นตท.พัทยา", "นตท.บ้านพลูตาหลวง",
+    "พสถ.ศรีราชา",
+    "กองบำรุงทางเขตหัวหิน",
+    "แขวงบำรุงทางกาญจนบุรี",
+    "นตท.ท่าเรือน้อย", "นตท.กาญจนบุรี", "นตท.ท่ากิเลน",
+    "นตท.วังโพ", "พสถ.กาญจนบุรี",
+    "แขวงบำรุงทางเพชรบุรี",
+    "นตท.ราชบุรี", "นตท.ปากท่อ", "นตท.เพชรบุรี",
+    "นตท.บ้านชะอำ", "นตท.สมุทรสงคราม", "พสถ.เพชรบุรี",
+    "แขวงบำรุงทางวังก์พง",
+    "นตท.หัวหิน", "นตท.ปราณบุรี", "นตท.สามร้อยยอด",
+    "นตท.กุยบุรี", "นตท.ประจวบคีรีขันธ์", "พสถ.หัวหิน",
+    "ศูนย์บำรุงทางภาคเหนือ",
+    "งานเครื่องกลบำรุงทางหนักตะพานหิน",
+    "กองบำรุงทางเขตนครสวรรค์",
+    "แขวงบำรุงทางอยุธยา",
+    "นตท.ดอนเมือง", "นตท.เชียงราก", "นตท.เชียงรากน้อย",
+    "นตท.บางปะอิน", "นตท.อยุธยา", "พสถ.อยุธยา",
+    "แขวงบำรุงทางลพบุรี",
+    "นตท.ท่าเรือ", "นตท.หนองโดน", "นตท.ลพบุรี",
+    "นตท.โคกกะเทียม", "พสถ.ลพบุรี",
+    "แขวงบำรุงทางนครสวรรค์",
+    "นตท.บ้านหมี่", "นตท.บ้านตาคลี", "นตท.เนินมะกอก",
+    "นตท.นครสวรรค์", "นตท.ชุมแสง", "พสถ.นครสวรรค์",
+    "แขวงบำรุงทางพิษณุโลก",
+    "นตท.บางมูลนาก", "นตท.ตะพานหิน", "นตท.ท่าฬ่อ",
+    "นตท.พิษณุโลก", "นตท.แควน้อย", "พสถ.พิษณุโลก",
+    "กองบำรุงทางเขตลำปาง",
+    "แขวงบำรุงทางอุตรดิตถ์",
+    "นตท.หนองตม", "นตท.ตรอน", "นตท.สวรรคโลกที่บ้านดารา",
+    "นตท.ศิลาอาสน์", "พสถ.ศิลาอาสน์",
+    "แขวงบำรุงทางเด่นชัย",
+    "นตท.ปางต้นผึ้ง", "นตท.เด่นชัย", "นตท.บ้านปิน",
+    "นตท.ผาคัน", "พสถ.เด่นชัย",
+    "แขวงบำรุงทางลำปาง",
+    "นตท.แม่จาง", "นตท.แม่เมาะ", "นตท.ลำปาง",
+    "นตท.ห้างฉัตร", "พสถ.ลำปาง",
+    "แขวงบำรุงทางลำพูน",
+    "นตท.ขุนตาน", "นตท.ศาลาแม่ทา", "นตท.ลำพูน",
+    "นตท.เชียงใหม่", "พสถ.เชียงใหม่",
+    "ศูนย์บำรุงทางภาคตะวันออกเฉียงเหนือ",
+    "งานเครื่องกลบำรุงทางหนักแก่งคอย",
+    "งานเครื่องกลบำรุงทางหนักนครราชสีมา",
+    "กองบำรุงทางเขตสุรินทร์",
+    "แขวงบำรุงทางแก่งคอย",
+    "นตท.หนองแซง", "นตท.สระบุรี", "นตท.แก่งคอย",
+    "นตท.มวกเหล็ก", "นตท.ปางอโศก", "พสถ.แก่งคอย",
+    "แขวงบำรุงทางนครราชสีมา",
+    "นตท.ปากช่อง", "นตท.สีคิ้ว", "นตท.กุดจิก",
+    "นตท.นครราชสีมา", "นตท.โนนสูง", "พสถ.นครราชสีมา",
+    "แขวงบำรุงทางลำปลายมาศ",
+    "นตท.จักราช", "นตท.ห้วยแถลง", "นตท.ลำปลายมาศ",
+    "นตท.บุรีรัมย์", "นตท.สุรินทร์", "พสถ.ลำชี",
+    "แขวงบำรุงทางศรีสะเกษ",
+    "นตท.ศรีขรภูมิ", "นตท.สำโรงทาบ", "นตท.ศรีสะเกษ",
+    "นตท.กันทรารมย์", "นตท.อุบลราชธานี", "พสถ.ศรีสะเกษ",
+    "กองบำรุงทางเขตขอนแก่น",
+    "แขวงบำรุงทางลำนารายณ์",
+    "นตท.หินซ้อน", "นตท.โคกสลุง", "นตท.ลำนารายณ์",
+    "นตท.โคกคลี", "นตท.บ้านวะตะแบก", "พสถ.ลำนารายณ์",
+    "แขวงบำรุงทางบัวใหญ่",
+    "นตท.บำเหน็จณรงค์", "นตท.จัตุรัส", "นตท.บ้านเหลื่อม",
+    "นตท.บัวใหญ่", "นตท.เมืองคง", "พสถ.บัวใหญ่",
+    "แขวงบำรุงทางขอนแก่น",
+    "นตท.หนองบัวลายที่เมืองพล", "นตท.บ้านหัน", "นตท.บ้านไผ่",
+    "นตท.ขอนแก่น", "นตท.โนนพยอม", "พสถ.ขอนแก่น",
+    "แขวงบำรุงทางอุดรธานี",
+    "นตท.น้ำพอง", "นตท.โนนสะอาด", "นตท.หนองตะไก้",
+    "นตท.อุดรธานี", "นตท.นาทา", "พสถ.อุดรธานี",
+    "ศูนย์บำรุงทางภาคใต้",
+    "งานเครื่องกลบำรุงทางหนักชุมพร",
+    "งานเครื่องกลบำรุงทางหนักหาดใหญ่",
+    "กองบำรุงทางเขตทุ่งสง",
+    "แขวงบำรุงทางบ้านกรูด",
+    "นตท.ทับสะแก", "นตท.บางสะพานใหญ่", "นตท.บางสะพานน้อย",
+    "นตท.มาบอำมฤต", "นตท.ปะทิว", "พสถ.บ้านกรูด",
+    "แขวงบำรุงทางชุมพร",
+    "นตท.ชุมพร", "นตท.สวี", "นตท.หลังสวน",
+    "นตท.ท่าชนะ", "นตท.ไชยา", "พสถ.ชุมพร",
+    "แขวงบำรุงทางบ้านส้อง",
+    "นตท.ท่าฉาง", "นตท.คีรีรัฐนิคม", "นตท.สุราษฎร์ธานี",
+    "นตท.บ้านนา", "นตท.บ้านส้อง", "พสถ.บ้านส้อง",
+    "แขวงบำรุงทางทุ่งสง",
+    "นตท.ทานพอ", "นตท.ทุ่งสง", "นตท.ที่วัง",
+    "นตท.ห้วยยอด", "นตท.ตรัง", "พสถ.ทุ่งสง",
+    "กองบำรุงทางเขตหาดใหญ่",
+    "แขวงบำรุงทางเขาชุมทอง",
+    "นตท.ร่อนพิบูลย์", "นตท.เขาชุมทอง", "นตท.นครศรีธรรมราช",
+    "นตท.ชะอวด", "นตท.พัทลุง", "พสถ.เขาชุมทอง",
+    "แขวงบำรุงทางหาดใหญ่",
+    "นตท.บางแก้ว", "นตท.ควนเนียง", "นตท.หาดใหญ่",
+    "นตท.คลองแงะ", "พสถ.หาดใหญ่",
+    "แขวงบำรุงทางเทพา",
+    "นตท.นาม่วง", "นตท.จะนะ", "นตท.ปัตตานี",
+    "นตท.ยะลา", "พสถ.เทพา",
+    "แขวงบำรุงทางตันหยงมัส",
+    "นตท.บาลอ", "นตท.ลาโละ", "นตท.ตันหยงมัส",
+    "นตท.สุไหงโก", "พสถ.ตันหยงมัส",
+]
 
-def as_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        text = str(value).strip().replace(",", ".")
-        if text == "":
-            return None
-        return float(text)
-    except ValueError:
-        return None
+# สายทาง
+RAILWAY_LINES = [
+    "สายเหนือ (กรุงเทพ-เชียงใหม่)",
+    "สายตะวันออกเฉียงเหนือ (กรุงเทพ-อุบลราชธานี)",
+    "สายตะวันออกเฉียงเหนือ (กรุงเทพ-หนองคาย)",
+    "สายใต้ (กรุงเทพ-สุไหงโก-ลก)",
+    "สายตะวันออก (กรุงเทพ-อรัญประเทศ)",
+    "สายแม่กลอง",
+    "สายวงเวียนใหญ่-มหาชัย",
+    "สายนครปฐม-กาญจนบุรี",
+    "สายตะวันออก (มาบตาพุด)",
+    "อื่นๆ",
+]
 
+# ประเภทความชำรุด
+DAMAGE_TYPES = [
+    "รางหัก (Rail Break)",
+    "รางแตกร้าว (Rail Crack)",
+    "รางชำรุด (Rail Defect)",
+    "รางบิดเบี้ยว (Rail Twist)",
+    "รางสึกกร่อน (Rail Wear)",
+    "รอยเชื่อมแตก (Weld Fracture)",
+    "หมอนรถไฟชำรุด (Sleeper Defect)",
+    "หินโรยทางทรุด (Ballast Settlement)",
+    "สลักยึดรางชำรุด (Fastener Defect)",
+    "อื่นๆ",
+]
 
-def compact_station(record: dict[str, Any]) -> str:
-    if record.get("station_from") and record.get("station_to"):
-        return f"{record.get('station_from')} - {record.get('station_to')}"
-    return record.get("station") or record.get("station_from") or "ไม่ระบุ"
+SEVERITY_MAP  = {'low': 'ต่ำ', 'med': 'ปานกลาง', 'high': 'สูง'}
+STATUS_MAP    = {'pending': 'รอดำเนินการ', 'inprog': 'กำลังซ่อมแซม', 'done': 'ซ่อมแซมแล้ว'}
 
+SEVERITY_COLORS = {'low': '#16a34a', 'med': '#d97706', 'high': '#dc2626'}
+STATUS_COLORS   = {'pending': '#6366f1', 'inprog': '#f59e0b', 'done': '#10b981'}
 
-def damage_label(record: dict[str, Any]) -> str:
-    return record.get("damage_group") or record.get("type") or "ไม่ระบุ"
-
-
-def defect_label(record: dict[str, Any]) -> str:
-    defects = record.get("defect_types")
-    if isinstance(defects, list) and defects:
-        return ", ".join(defects)
-    return record.get("type") or "ไม่ระบุ"
-
-
-def save_uploaded_files(report_id: str, uploaded_files: list[Any]) -> list[str]:
-    if not uploaded_files:
-        return []
-
-    target_dir = UPLOAD_DIR / report_id
-    target_dir.mkdir(parents=True, exist_ok=True)
-    saved_names: list[str] = []
-
-    for file in uploaded_files:
-        safe_name = re.sub(r"[^0-9A-Za-zก-๙._ -]", "_", file.name).strip()
-        file_path = target_dir / safe_name
-        file_path.write_bytes(file.getbuffer())
-        saved_names.append(str(file_path.relative_to(BASE_DIR)))
-
-    return saved_names
-
-
-def records_to_dataframe(records: list[dict[str, Any]]) -> pd.DataFrame:
-    if not records:
-        return pd.DataFrame()
-
-    rows = []
-    for record in records:
-        rows.append(
-            {
-                "รหัสรายงาน": record.get("id", ""),
-                "วันที่พบเหตุ": record.get("date", ""),
-                "เวลา": record.get("time", ""),
-                "สาย": record.get("line", ""),
-                "ช่วงสถานี": compact_station(record),
-                "กม.": record.get("km", ""),
-                "ประเภทหลัก": damage_label(record),
-                "ลักษณะความเสียหาย": defect_label(record),
-                "ตำแหน่งรอยชำรุด": record.get("damage_location", ""),
-                "ความรุนแรง": SEVERITY_MAP.get(record.get("severity"), record.get("severity", "")),
-                "สถานะ": STATUS_MAP.get(record.get("status"), record.get("status", "")),
-                "มาตรการ": record.get("action", ""),
-                "หน่วยงาน/เขต": record.get("dept", ""),
-                "ผู้รายงาน": record.get("reporter", ""),
-                "ละติจูด": record.get("lat", ""),
-                "ลองจิจูด": record.get("lng", ""),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def count_series(df: pd.DataFrame, column: str, top: int | None = None) -> pd.DataFrame:
-    if df.empty or column not in df.columns:
-        return pd.DataFrame(columns=[column, "จำนวน"])
-    data = df[column].fillna("ไม่ระบุ").replace("", "ไม่ระบุ").value_counts().reset_index()
-    data.columns = [column, "จำนวน"]
-    return data.head(top) if top else data
-
-
-def render_hero() -> None:
-    st.markdown(
-        """
-<div class="hero">
-  <div class="hero-kicker">SRT Permanent Way</div>
-  <div class="hero-title">ระบบรายงานรางชำรุด หัก แตกร้าว (แบบ บท.27)</div>
-  <div class="hero-subtitle">
-    บันทึกเหตุจากแบบฟอร์มภาคสนาม ติดตามสถานะการซ่อม และดูพื้นที่เสี่ยงจากสถิติและแผนที่ในหน้าเดียว
-  </div>
-  <div class="hero-producer">จัดทำโดย กองทางถาวร และกองเทคนิคทางถาวร</div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-
-def section(title: str, note: str | None = None) -> None:
-    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
-    if note:
-        st.markdown(f'<div class="soft-note">{note}</div>', unsafe_allow_html=True)
-
-
-def render_damage_map(records: list[dict[str, Any]]) -> None:
-    rows = []
-    for record in records:
-        lat = as_float(record.get("lat"))
-        lon = as_float(record.get("lng") or record.get("lon"))
-        if lat is None or lon is None:
-            continue
-        group = record.get("damage_group") or "รางชำรุด"
-        rows.append(
-            {
-                "lat": lat,
-                "lon": lon,
-                "id": record.get("id", ""),
-                "damage_group": group,
-                "station": compact_station(record),
-                "km": record.get("km", ""),
-                "severity": SEVERITY_MAP.get(record.get("severity"), record.get("severity", "")),
-                "status": STATUS_MAP.get(record.get("status"), record.get("status", "")),
-                "color": COLOR_BY_DAMAGE.get(group, [80, 90, 110, 190]),
-            }
-        )
-
-    st.markdown(
-        """
-<div class="legend">
-  <span class="legend-item"><span class="dot" style="background:#7a0019"></span>รางหัก</span>
-  <span class="legend-item"><span class="dot" style="background:#e08200"></span>รางชำรุด</span>
-  <span class="legend-item"><span class="dot" style="background:#0f4c81"></span>รางแตกร้าว</span>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    if not rows:
-        st.markdown(
-            '<div class="empty-panel">ยังไม่มีรายการที่ระบุพิกัดละติจูดและลองจิจูดสำหรับแสดงบนแผนที่</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    map_df = pd.DataFrame(rows)
-    center_lat = float(map_df["lat"].mean())
-    center_lon = float(map_df["lon"].mean())
-
-    if pdk is None:
-        st.map(map_df.rename(columns={"lon": "longitude", "lat": "latitude"}))
-        return
-
-    layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=map_df,
-        get_position="[lon, lat]",
-        get_fill_color="color",
-        get_radius=95,
-        pickable=True,
-        radius_min_pixels=7,
-        radius_max_pixels=18,
-    )
-    tooltip = {
-        "html": "<b>{id}</b><br>{damage_group}<br>ช่วงสถานี: {station}<br>กม.: {km}<br>ระดับ: {severity}<br>สถานะ: {status}",
-        "style": {"backgroundColor": "#0b2341", "color": "white", "fontFamily": "Sarabun"},
-    }
-    deck = pdk.Deck(
-        map_style=None,
-        initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=6, pitch=0),
-        layers=[layer],
-        tooltip=tooltip,
-    )
-    st.pydeck_chart(deck, use_container_width=True)
-
+# พิกัดสถานีหลัก (ตัวอย่างสำหรับแผนที่)
+STATION_COORDS = {
+    "กรุงเทพ": (13.7437, 100.5316),
+    "ดอนเมือง": (13.9135, 100.6066),
+    "อยุธยา": (14.3567, 100.5706),
+    "ลพบุรี": (14.7994, 100.6536),
+    "นครสวรรค์": (15.7030, 100.1373),
+    "พิษณุโลก": (16.8239, 100.2659),
+    "ลำปาง": (18.2855, 99.4931),
+    "เชียงใหม่": (18.7967, 98.9665),
+    "แก่งคอย": (14.5882, 101.1516),
+    "นครราชสีมา": (14.9799, 102.0978),
+    "ขอนแก่น": (16.4419, 102.8360),
+    "อุดรธานี": (17.4138, 102.7876),
+    "สุรินทร์": (14.8827, 103.4956),
+    "ศรีสะเกษ": (15.1186, 104.3220),
+    "อุบลราชธานี": (15.2448, 104.8473),
+    "ชุมพร": (10.4930, 99.1800),
+    "สุราษฎร์ธานี": (9.1400, 99.3308),
+    "ทุ่งสง": (8.1617, 99.6756),
+    "หาดใหญ่": (7.0086, 100.4747),
+    "ยะลา": (6.5425, 101.2800),
+    "ฉะเชิงเทรา": (13.6909, 101.0724),
+    "ปราจีนบุรี": (14.0511, 101.3661),
+    "สระแก้ว": (13.8240, 102.0643),
+    "ชลบุรี": (13.3611, 100.9847),
+    "ศรีราชา": (13.1282, 100.9235),
+    "กาญจนบุรี": (14.0227, 99.5328),
+    "เพชรบุรี": (13.1119, 99.9392),
+    "หัวหิน": (12.5706, 99.9578),
+    "ประจวบคีรีขันธ์": (11.8131, 99.7967),
+    "บางซื่อ": (13.8036, 100.5295),
+    "ธนบุรี": (13.7269, 100.4836),
+    "มักกะสัน": (13.7500, 100.5611),
+}
 
 records = load_records()
 
-render_hero()
-
+# ----------------- 4. Sidebar -----------------
 with st.sidebar:
-    st.markdown("### เมนูหลัก")
+    st.markdown("""
+    <div class="sidebar-logo">
+        <img src="[upload.wikimedia.org](https://upload.wikimedia.org/wikipedia/th/thumb/d/d5/State_Railway_of_Thailand_Logo.svg/1200px-State_Railway_of_Thailand_Logo.svg.png)"
+             width="72" style="filter: brightness(0) invert(1);">
+        <div class="sidebar-brand">การรถไฟแห่งประเทศไทย</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
     menu = st.radio(
-        "เลือกหน้าต่างการทำงาน",
-        ["แจ้งความเสียหาย", "รายการแจ้งเหตุ", "แดชบอร์ดสถิติ"],
-        label_visibility="collapsed",
+        "เมนู",
+        ["📝 แจ้งความเสียหาย", "📋 รายการแจ้งเหตุ", "📊 แดชบอร์ดสถิติ"],
+        label_visibility="collapsed"
     )
     st.markdown("---")
-    st.caption("Rail Damage Reporting System v2.0")
-    st.caption("จัดทำโดย กองทางถาวร และกองเทคนิคทางถาวร")
+    st.markdown(f"""
+    <div style='font-size:12px; opacity:0.6; text-align:center;'>
+        เวอร์ชัน 2.0.0<br>
+        อัปเดต: {datetime.now().strftime('%d/%m/%Y')}
+    </div>
+    """, unsafe_allow_html=True)
+
+# Topbar
+st.markdown("""
+<div class="topbar-header">
+    <div class="topbar-icon">🛤️</div>
+    <div>
+        <div class="topbar-title">ระบบรายงานรางชำรุดหักแตกร้าว</div>
+        <div class="topbar-sub">Rail Damage Reporting System · การรถไฟแห่งประเทศไทย (SRT)</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
-if menu == "แจ้งความเสียหาย":
-    st.markdown("### ส่งรายงานความเสียหายของราง")
+# ===============================================================
+# หน้า 1: แจ้งความเสียหาย
+# ===============================================================
+if menu == "📝 แจ้งความเสียหาย":
+    st.markdown("""
+    <div class="section-header"><h4>📝 ส่งรายงานรางชำรุดใหม่</h4></div>
+    """, unsafe_allow_html=True)
 
-    with st.form("new_report_form", clear_on_submit=False):
-        section("1. รายการทั่วไป", "ข้อมูลตำแหน่งทางและสภาพทางตามแบบรายงานภาคสนาม")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            date_input = st.date_input("วันที่ตรวจพบ *")
-            line_input = st.selectbox("ทางประธานหรือทางแยก / สาย *", options=LINES)
-            track_class_input = st.selectbox("ชั้นของทาง", options=TRACK_CLASS)
-            station_from = st.text_input("ระหว่างสถานี จาก *")
-        with col2:
-            time_input = st.time_input("เวลา *")
-            track_direction = st.selectbox("ชนิดของทาง", options=TRACK_DIRECTION)
-            traffic_type = st.selectbox("ประเภทการใช้งานทาง", options=TRAFFIC_TYPE)
-            station_to = st.text_input("ถึงสถานี *")
-        with col3:
-            km_input = st.text_input("กม.ที่ *", placeholder="เช่น 145+912")
-            telegraph_input = st.text_input("เสาโทรเลข / หลักเขต")
-            speed_limit = st.number_input("ความเร็วสูงสุดที่อนุญาต (กม./ชม.)", min_value=0, max_value=200, value=0)
-            train_count = st.number_input("จำนวนขบวนรถใน 24 ชม. (รวม)", min_value=0, step=1)
+    with st.form("new_report_form", clear_on_submit=True):
 
-        col4, col5, col6 = st.columns(3)
-        with col4:
-            alignment = st.selectbox("ลักษณะของทาง", options=ALIGNMENT_OPTIONS)
-            curve_radius = st.text_input("รัศมีโค้ง (ม.)")
-        with col5:
-            slope = st.selectbox("ระดับความลาดชันของทาง", options=SLOPE_OPTIONS)
-            wet_condition = st.selectbox("สภาพทางขณะพบเหตุ", options=WET_OPTIONS)
-        with col6:
-            joint_position = st.text_input("ตำแหน่งรอยต่อ/จุดกึ่งกลางหมอน")
-            passenger_freight_count = st.text_input("จำนวนรถโดยสาร/สินค้า (ถ้ามี)")
+        # === ส่วนที่ 1: ข้อมูลจุดเกิดเหตุ ===
+        st.markdown("##### 📍 ข้อมูลจุดเกิดเหตุ")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            date_input     = st.date_input("📅 วันที่พบเหตุ", value=datetime.today())
+        with c2:
+            time_input     = st.time_input("⏰ เวลาที่พบเหตุ", value=datetime.now().time())
+        with c3:
+            line_input     = st.selectbox("🚆 สายทาง *", options=["-- เลือกสายทาง --"] + RAILWAY_LINES)
 
-        section("2. รายละเอียดเกี่ยวกับราง", "ข้อมูลชนิดราง ประวัติการใช้งาน และงานเชื่อม")
-        r1, r2, r3 = st.columns(3)
-        with r1:
-            rail_size = st.text_input("น้ำหนัก/ขนาดของราง", placeholder="เช่น 50N, 54E1, BS80A")
-            rail_length = st.text_input("ความยาวราง (ม.)")
-            rail_kind = st.selectbox("ชนิดของรางที่พบความเสียหาย", options=RAIL_KIND)
-        with r2:
-            rail_mark = st.text_input("เครื่องหมาย/ยี่ห้อ/ปี พ.ศ. ของราง")
-            rail_laid_date = st.text_input("รางวางเมื่อ")
-            prior_turn_or_replace = st.selectbox("เคยกลับหรือเปลี่ยนข้างของรางหรือไม่", options=YES_NO)
-        with r3:
-            weld_nearby = st.selectbox("จุดหักอยู่ภายใน 10 ซม. จากรอยเชื่อมหรือไม่", options=YES_NO)
-            weld_method = st.text_input("วิธีการเชื่อม")
-            last_weld_date = st.text_input("เชื่อมครั้งสุดท้ายเมื่อ")
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            station_input  = st.text_input("🏠 สถานีใกล้เคียง", placeholder="เช่น สถานีอยุธยา")
+        with c5:
+            km_input       = st.text_input("📏 กิโลเมตรที่ (KM)", placeholder="เช่น 71+500")
+        with c6:
+            rail_id_input  = st.text_input("🔢 หมายเลขราง (Rail ID)", placeholder="เช่น R-01-L")
 
-        r4, r5, r6 = st.columns(3)
-        with r4:
-            ballast_cycle = st.text_input("วาระการอัดหิน", placeholder="เช่น นานๆ ครั้ง / ปานกลาง / บ่อยๆ")
-        with r5:
-            sleeper_condition = st.text_input("สภาพหมอนรองราง/เครื่องยึดเหนี่ยว")
-        with r6:
-            rail_weight_loss = st.text_input("น้ำหนักรางเมื่อหัก/น้ำหนักที่หายไป")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        section("3. รายละเอียดเกี่ยวกับรางกันและทาง", "กรณีเกิดในบริเวณรางกัน สะพาน ประแจ หรือทางพิเศษ")
-        g1, g2, g3 = st.columns(3)
-        with g1:
-            guard_area = st.selectbox("ถ้ารางหักอยู่ภายในเหล็กประกับราง", options=YES_NO)
-            guard_action = st.text_input("การดำเนินการกับรางกัน/เหล็กประกับ")
-        with g2:
-            guard_condition = st.text_input("สภาพราง/เหล็กประกับราง")
-            tie_plate_condition = st.text_input("แป้นรองราง/เครื่องยึดเหนี่ยว")
-        with g3:
-            nearby_history = st.text_input("เคยมีรางหักบริเวณใกล้เคียงหรือไม่")
-            nearby_km_date = st.text_input("ถ้ามี ระบุ กม. และวันที่")
-
-        section("4. รายละเอียดความเสียหาย", "เลือกประเภทหลักและลักษณะความเสียหายตามรายการในแบบฟอร์ม")
-        d1, d2, d3 = st.columns(3)
-        with d1:
-            damage_group = st.selectbox("ประเภทเหตุหลัก *", options=DAMAGE_GROUPS)
-            defect_types = st.multiselect("ลักษณะความเสียหายบริเวณหัวราง/ราง", options=DAMAGE_TYPES)
-            other_defect = st.text_input("อื่นๆ ระบุ")
-        with d2:
-            damage_location = st.selectbox("จุดที่ชำรุด", options=DAMAGE_LOCATION)
-            crack_length = st.text_input("ความยาว/ขนาดรอยแตกหรือรอยชำรุด (มม.)")
-            temperature = st.text_input("อุณหภูมิขณะพบเหตุ", placeholder="เช่น ร้อน / ปานกลาง / หนาว / 38°C")
-        with d3:
+        # === ส่วนที่ 2: ลักษณะความเสียหาย ===
+        st.markdown("##### 🔧 ลักษณะความเสียหาย")
+        c7, c8, c9 = st.columns(3)
+        with c7:
+            type_input     = st.selectbox("💥 ประเภทความชำรุด *", options=["-- เลือกประเภท --"] + DAMAGE_TYPES)
+        with c8:
+            length_input   = st.text_input("📐 ความยาว/ขนาดชำรุด", placeholder="เช่น 15 ซม.")
+        with c9:
             severity_input = st.selectbox(
-                "ระดับความรุนแรง *",
+                "⚠️ ระดับความรุนแรง *",
                 options=list(SEVERITY_MAP.keys()),
-                format_func=lambda key: SEVERITY_MAP[key],
-                index=1,
-            )
-            action_input = st.selectbox("มาตรการแก้ไขเบื้องต้น *", options=REPAIR_ACTIONS)
-            status_input = st.selectbox(
-                "สถานะการซ่อมแซม",
-                options=list(STATUS_MAP.keys()),
-                format_func=lambda key: STATUS_MAP[key],
+                format_func=lambda x: f"{'🔴' if x=='high' else '🟡' if x=='med' else '🟢'} {SEVERITY_MAP[x]}"
             )
 
-        d4, d5 = st.columns(2)
-        with d4:
-            found_by = st.text_input("ตรวจพบโดย")
-            found_context = st.text_area("ขณะตรวจพบ / เหตุการณ์ประกอบ", height=90)
-        with d5:
-            replacement_rail = st.text_input("รางที่นำมาเปลี่ยนใหม่")
-            damage_notes = st.text_area("หมายเหตุ / รายละเอียดเพิ่มเติม", height=90)
+        c10, c11 = st.columns(2)
+        with c10:
+            detail_input   = st.text_area("📝 รายละเอียดเพิ่มเติม", placeholder="อธิบายลักษณะความเสียหายโดยละเอียด...", height=110)
+        with c11:
+            action_input   = st.text_area("💡 การดำเนินการเบื้องต้น", placeholder="ระบุการดำเนินการที่ได้ดำเนินไปแล้ว...", height=110)
 
-        section("5. พิกัดและรูปประกอบ", "กรอกพิกัดเพื่อให้แดชบอร์ดแสดงจุดเกิดเหตุบนแผนที่")
-        p1, p2, p3 = st.columns(3)
-        with p1:
-            lat_input = st.text_input("ละติจูด", placeholder="เช่น 13.7563")
-        with p2:
-            lng_input = st.text_input("ลองจิจูด", placeholder="เช่น 100.5018")
-        with p3:
-            drawing_ref = st.text_input("เลขที่รูป/อ้างอิงภาพร่าง")
-        uploaded_files = st.file_uploader(
-            "แนบภาพถ่ายหรือรูปด้านบน/ด้านข้าง/รูปตัด",
-            accept_multiple_files=True,
-            type=["png", "jpg", "jpeg", "pdf"],
-        )
+        # พิกัด GPS
+        c12, c13 = st.columns(2)
+        with c12:
+            lat_input      = st.text_input("🌐 ละติจูด (Latitude)", placeholder="เช่น 14.3567")
+        with c13:
+            lon_input      = st.text_input("🌐 ลองจิจูด (Longitude)", placeholder="เช่น 100.5706")
 
-        section("6. ข้อมูลผู้รายงาน", "กรอกหน่วยงาน/เขตตามหน่วยงานต้นสังกัดหรือพื้นที่รับผิดชอบ")
-        u1, u2, u3 = st.columns(3)
-        with u1:
-            reporter_input = st.text_input("ผู้รายงาน *")
-            position_input = st.text_input("ตำแหน่ง")
-        with u2:
-            dept_input = st.text_input("หน่วยงาน/เขต *", placeholder="เช่น แขวงบำรุงทาง... / นตท....")
-            phone_input = st.text_input("เบอร์โทรศัพท์")
-        with u3:
-            approved_by = st.text_input("ผู้ตรวจ/ผู้รับรอง")
-            approved_position = st.text_input("ตำแหน่งผู้ตรวจ/ผู้รับรอง")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        st.markdown("ช่องที่มีเครื่องหมาย * เป็นข้อมูลจำเป็น")
-        submit_btn = st.form_submit_button("บันทึกข้อมูลรายงาน", use_container_width=True)
+        # === ส่วนที่ 3: ข้อมูลผู้รายงาน ===
+        st.markdown("##### 👤 ข้อมูลผู้รายงาน")
+        c14, c15, c16 = st.columns(3)
+        with c14:
+            reporter_input = st.text_input("👤 ชื่อ-นามสกุล *", placeholder="ชื่อผู้รายงาน")
+        with c15:
+            position_input = st.text_input("💼 ตำแหน่ง", placeholder="เช่น นายช่างโยธา")
+        with c16:
+            phone_input    = st.text_input("📞 เบอร์โทรศัพท์", placeholder="เช่น 081-234-5678")
+
+        dept_input = st.selectbox("🏢 หน่วยงาน/แขวง *", options=["-- เลือกหน่วยงาน --"] + DEPARTMENTS)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        submit_btn = st.form_submit_button("💾 บันทึกและส่งรายงาน", use_container_width=True)
 
         if submit_btn:
-            required_values = {
-                "ระหว่างสถานี จาก": station_from,
-                "ถึงสถานี": station_to,
-                "กม.ที่": km_input,
-                "ผู้รายงาน": reporter_input,
-            }
-            missing = [label for label, value in required_values.items() if not str(value).strip()]
-            if missing:
-                st.error("กรุณากรอกข้อมูลจำเป็นให้ครบถ้วน: " + ", ".join(missing))
+            errors = []
+            if line_input     == "-- เลือกสายทาง --":  errors.append("สายทาง")
+            if type_input     == "-- เลือกประเภท --":  errors.append("ประเภทความชำรุด")
+            if not reporter_input.strip():               errors.append("ชื่อ-นามสกุลผู้รายงาน")
+            if dept_input     == "-- เลือกหน่วยงาน --": errors.append("หน่วยงาน")
+
+            if errors:
+                st.error(f"⚠️ กรุณากรอก/เลือก: {', '.join(errors)}")
             else:
-                report_id = generate_id(records)
-                defects = defect_types.copy()
-                if other_defect.strip():
-                    defects.append(other_defect.strip())
-                saved_files = save_uploaded_files(report_id, uploaded_files)
+                # แปลงพิกัด
+                try:
+                    lat = float(lat_input) if lat_input.strip() else None
+                    lon = float(lon_input) if lon_input.strip() else None
+                except ValueError:
+                    lat = lon = None
+
+                # ถ้าไม่มีพิกัด ใช้พิกัดสถานีใกล้เคียงถ้าหาได้
+                if lat is None or lon is None:
+                    for k, v in STATION_COORDS.items():
+                        if k in station_input:
+                            lat, lon = v
+                            break
 
                 new_record = {
-                    "id": report_id,
-                    "date": str(date_input),
-                    "time": str(time_input),
-                    "line": line_input,
-                    "track_class": track_class_input,
-                    "track_direction": track_direction,
-                    "traffic_type": traffic_type,
-                    "station_from": station_from.strip(),
-                    "station_to": station_to.strip(),
-                    "km": km_input.strip(),
-                    "telegraph": telegraph_input.strip(),
-                    "speed_limit": speed_limit,
-                    "train_count": train_count,
-                    "passenger_freight_count": passenger_freight_count.strip(),
-                    "alignment": alignment,
-                    "curve_radius": curve_radius.strip(),
-                    "slope": slope,
-                    "wet_condition": wet_condition,
-                    "joint_position": joint_position.strip(),
-                    "rail_size": rail_size.strip(),
-                    "rail_length": rail_length.strip(),
-                    "rail_kind": rail_kind,
-                    "rail_mark": rail_mark.strip(),
-                    "rail_laid_date": rail_laid_date.strip(),
-                    "prior_turn_or_replace": prior_turn_or_replace,
-                    "weld_nearby": weld_nearby,
-                    "weld_method": weld_method.strip(),
-                    "last_weld_date": last_weld_date.strip(),
-                    "ballast_cycle": ballast_cycle.strip(),
-                    "sleeper_condition": sleeper_condition.strip(),
-                    "rail_weight_loss": rail_weight_loss.strip(),
-                    "guard_area": guard_area,
-                    "guard_action": guard_action.strip(),
-                    "guard_condition": guard_condition.strip(),
-                    "tie_plate_condition": tie_plate_condition.strip(),
-                    "nearby_history": nearby_history.strip(),
-                    "nearby_km_date": nearby_km_date.strip(),
-                    "damage_group": damage_group,
-                    "defect_types": defects,
-                    "type": defects[0] if defects else damage_group,
-                    "damage_location": damage_location,
-                    "crack_length": crack_length.strip(),
-                    "length_mm": crack_length.strip(),
-                    "temperature": temperature.strip(),
-                    "severity": severity_input,
-                    "action": action_input,
-                    "status": status_input,
-                    "found_by": found_by.strip(),
-                    "found_context": found_context.strip(),
-                    "replacement_rail": replacement_rail.strip(),
-                    "detail": damage_notes.strip(),
-                    "lat": lat_input.strip(),
-                    "lng": lng_input.strip(),
-                    "drawing_ref": drawing_ref.strip(),
-                    "images": saved_files,
-                    "reporter": reporter_input.strip(),
-                    "position": position_input.strip(),
-                    "dept": dept_input,
-                    "phone": phone_input.strip(),
-                    "approved_by": approved_by.strip(),
-                    "approved_position": approved_position.strip(),
-                    "createdAt": datetime.now().isoformat(),
-                    "updatedAt": datetime.now().isoformat(),
+                    'id':        generate_id(),
+                    'date':      str(date_input),
+                    'time':      str(time_input),
+                    'line':      line_input,
+                    'station':   station_input,
+                    'km':        km_input,
+                    'railId':    rail_id_input,
+                    'type':      type_input,
+                    'length':    length_input,
+                    'severity':  severity_input,
+                    'detail':    detail_input,
+                    'action':    action_input,
+                    'lat':       lat,
+                    'lon':       lon,
+                    'reporter':  reporter_input,
+                    'position':  position_input,
+                    'dept':      dept_input,
+                    'phone':     phone_input,
+                    'status':    'pending',
+                    'createdAt': datetime.now().isoformat()
                 }
                 records.append(new_record)
                 save_records(records)
-                st.success(f"บันทึกรายงานสำเร็จ รหัสรายงาน: {report_id}")
-                st.info("ไปที่หน้าแดชบอร์ดสถิติเพื่อตรวจสอบจำนวนเหตุการณ์ แผนที่ และสถานะซ่อมแซม")
+                st.success(f"✅ บันทึกรายงานสำเร็จ! รหัสเอกสาร: **{new_record['id']}**")
+                st.balloons()
 
 
-elif menu == "รายการแจ้งเหตุ":
-    st.markdown("### รายการรายงานความเสียหายทั้งหมด")
+# ===============================================================
+# หน้า 2: รายการแจ้งเหตุ
+# ===============================================================
+elif menu == "📋 รายการแจ้งเหตุ":
+    st.markdown("""
+    <div class="section-header"><h4>📋 รายการรายงานความเสียหายทั้งหมด</h4></div>
+    """, unsafe_allow_html=True)
 
-    if not records:
-        st.markdown('<div class="empty-panel">ยังไม่มีข้อมูลรายงานในระบบ</div>', unsafe_allow_html=True)
+    if len(records) == 0:
+        st.info("ยังไม่มีข้อมูลรายงานในระบบ")
     else:
-        df = records_to_dataframe(records)
-        output = StringIO()
-        writer = csv.writer(output, lineterminator="\n")
-        writer.writerow(df.columns.tolist())
-        writer.writerows(df.fillna("").values.tolist())
+        # ---- Filter bar ----
+        fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
+        with fc1:
+            f_line = st.selectbox("กรองตามสายทาง", ["ทั้งหมด"] + RAILWAY_LINES)
+        with fc2:
+            f_sev  = st.selectbox("กรองตามความรุนแรง",
+                                  ["ทั้งหมด"] + [SEVERITY_MAP[k] for k in SEVERITY_MAP])
+        with fc3:
+            f_stat = st.selectbox("กรองตามสถานะ",
+                                  ["ทั้งหมด"] + [STATUS_MAP[k] for k in STATUS_MAP])
+        with fc4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            # Export
+            output = StringIO()
+            writer = csv.writer(output, lineterminator='\n')
+            writer.writerow(['รหัส','วันที่','เวลา','สาย','สถานี','ประเภท','ความรุนแรง','สถานะ','ผู้รายงาน','หน่วยงาน'])
+            for r in records:
+                writer.writerow([r.get('id'), r.get('date'), r.get('time'), r.get('line'),
+                                  r.get('station'), r.get('type'),
+                                  SEVERITY_MAP.get(r.get('severity'), ''),
+                                  STATUS_MAP.get(r.get('status'), ''),
+                                  r.get('reporter'), r.get('dept')])
+            st.download_button("📥 CSV", data=output.getvalue().encode('utf-8-sig'),
+                               file_name='rail_damage.csv', mime='text/csv')
 
-        st.download_button(
-            label="ส่งออกข้อมูลทั้งหมดเป็น CSV",
-            data=output.getvalue().encode("utf-8-sig"),
-            file_name="rail_damage_records.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+        # Apply filters
+        filtered = records
+        if f_line != "ทั้งหมด":
+            filtered = [r for r in filtered if r.get('line') == f_line]
+        if f_sev  != "ทั้งหมด":
+            filtered = [r for r in filtered if SEVERITY_MAP.get(r.get('severity')) == f_sev]
+        if f_stat != "ทั้งหมด":
+            filtered = [r for r in filtered if STATUS_MAP.get(r.get('status')) == f_stat]
 
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.caption(f"แสดง {len(filtered)} รายการ จากทั้งหมด {len(records)} รายการ")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        st.markdown("#### รายละเอียดและการอัปเดตสถานะ")
-        for idx, record in enumerate(records):
-            status = STATUS_MAP.get(record.get("status"), "รอตรวจสอบ")
-            severity = SEVERITY_MAP.get(record.get("severity"), "ไม่ระบุ")
-            title = f"{record.get('id')} | {damage_label(record)} | {compact_station(record)} | กม. {record.get('km', '-')}"
+        for idx, r in enumerate(filtered):
+            orig_idx  = records.index(r)
+            sev_label = SEVERITY_MAP.get(r.get('severity'), 'ไม่ระบุ')
+            sev_key   = r.get('severity', 'low')
+            sev_color = {'high': '🔴', 'med': '🟡', 'low': '🟢'}.get(sev_key, '⚪')
+            status_icon = {"pending": "⏳", "inprog": "🛠️", "done": "✅"}.get(r.get('status'), "⏳")
 
-            with st.expander(title):
-                a, b, c = st.columns([1.2, 1, 1])
-                with a:
-                    st.write(f"วันที่พบเหตุ: {record.get('date')} เวลา {record.get('time')}")
-                    st.write(f"สาย: {record.get('line')} | ชนิดทาง: {record.get('track_direction', '-')}")
-                    st.write(f"ลักษณะความเสียหาย: {defect_label(record)}")
-                    st.write(f"ตำแหน่งรอยชำรุด: {record.get('damage_location', '-')}")
-                    st.write(f"รายละเอียด: {record.get('detail', '-')}")
-                with b:
-                    st.write(f"ระดับความรุนแรง: {severity}")
-                    st.write(f"สถานะ: {status}")
-                    st.write(f"มาตรการ: {record.get('action', '-')}")
-                    st.write(f"พิกัด: {record.get('lat', '-')}, {record.get('lng', '-')}")
-                    st.write(f"ไฟล์แนบ: {len(record.get('images', []))} ไฟล์")
-                with c:
-                    st.write(f"ผู้รายงาน: {record.get('reporter', '-')}")
-                    st.write(f"ตำแหน่ง: {record.get('position', '-')}")
-                    st.write(f"หน่วยงาน/เขต: {record.get('dept', '-')}")
-                    st.write(f"โทร: {record.get('phone', '-')}")
-
-                s1, s2 = st.columns([2, 1])
-                with s1:
-                    current_status = record.get("status", "pending")
-                    if current_status not in STATUS_MAP:
-                        current_status = "pending"
+            with st.expander(
+                f"{status_icon} {sev_color} [{r.get('id')}]  "
+                f"{r.get('line','–')}  |  "
+                f"สถานี{r.get('station','–')}  |  "
+                f"{r.get('type','–')}  |  "
+                f"ความรุนแรง: {sev_label}"
+            ):
+                cd1, cd2 = st.columns(2)
+                with cd1:
+                    st.markdown(f"**📅 วันที่-เวลา:** {r.get('date')} เวลา {r.get('time')}")
+                    st.markdown(f"**📍 ตำแหน่ง:** KM {r.get('km','–')}  |  ราง: {r.get('railId','–')}")
+                    st.markdown(f"**💥 ประเภท:** {r.get('type','–')}")
+                    st.markdown(f"**📐 ขนาด:** {r.get('length','–')}")
+                    st.markdown(f"**📝 รายละเอียด:** {r.get('detail','–')}")
+                    st.markdown(f"**💡 การดำเนินการ:** {r.get('action','–')}")
+                with cd2:
+                    st.markdown(f"**👤 ผู้รายงาน:** {r.get('reporter','–')}")
+                    st.markdown(f"**💼 ตำแหน่ง:** {r.get('position','–')}")
+                    st.markdown(f"**🏢 หน่วยงาน:** {r.get('dept','–')}")
+                    st.markdown(f"**📞 ติดต่อ:** {r.get('phone','–')}")
+                    st.markdown("---")
                     new_status = st.selectbox(
-                        "อัปเดตสถานะการซ่อมแซม",
+                        "🔄 สถานะการซ่อมแซม",
                         options=list(STATUS_MAP.keys()),
-                        index=list(STATUS_MAP.keys()).index(current_status),
-                        format_func=lambda key: STATUS_MAP[key],
-                        key=f"status_{record.get('id')}",
+                        index=list(STATUS_MAP.keys()).index(r.get('status', 'pending')),
+                        format_func=lambda x: STATUS_MAP[x],
+                        key=f"status_{r.get('id')}"
                     )
-                with s2:
-                    st.write("")
-                    st.write("")
-                    if st.button("อัปเดตสถานะ", key=f"update_{record.get('id')}", use_container_width=True):
-                        records[idx]["status"] = new_status
-                        records[idx]["updatedAt"] = datetime.now().isoformat()
+                    cb1, cb2 = st.columns(2)
+                    if cb1.button("🔄 อัปเดต", key=f"upd_{r.get('id')}"):
+                        records[orig_idx]['status'] = new_status
                         save_records(records)
-                        st.success("อัปเดตสถานะแล้ว")
+                        st.success("อัปเดตแล้ว!")
+                        st.rerun()
+                    if cb2.button("🗑️ ลบ", key=f"del_{r.get('id')}"):
+                        records.pop(orig_idx)
+                        save_records(records)
                         st.rerun()
 
 
-elif menu == "แดชบอร์ดสถิติ":
-    st.markdown("### แดชบอร์ดสถิติและพื้นที่เสี่ยง")
+# ===============================================================
+# หน้า 3: แดชบอร์ดสถิติ
+# ===============================================================
+elif menu == "📊 แดชบอร์ดสถิติ":
+    st.markdown("""
+    <div class="section-header"><h4>📊 แดชบอร์ดภาพรวมสถิติ</h4></div>
+    """, unsafe_allow_html=True)
 
-    total = len(records)
-    rail_break = sum(1 for r in records if r.get("damage_group") == "รางหัก")
-    rail_damage = sum(1 for r in records if r.get("damage_group") == "รางชำรุด")
-    rail_crack = sum(1 for r in records if r.get("damage_group") == "รางแตกร้าว")
-    urgent = sum(1 for r in records if r.get("severity") in {"high", "critical"})
+    total   = len(records)
+    high    = len([r for r in records if r.get('severity') == 'high'])
+    pending = len([r for r in records if r.get('status') == 'pending'])
+    inprog  = len([r for r in records if r.get('status') == 'inprog'])
+    done    = len([r for r in records if r.get('status') == 'done'])
 
+    # --- KPI Row ---
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("จำนวนเหตุการณ์", f"{total:,}")
-    k2.metric("รางหัก", f"{rail_break:,}")
-    k3.metric("รางชำรุด", f"{rail_damage:,}")
-    k4.metric("รางแตกร้าว", f"{rail_crack:,}")
-    k5.metric("เร่งด่วน/วิกฤต", f"{urgent:,}")
+    k1.metric("📋 รายงานทั้งหมด", total)
+    k2.metric("🔴 ความรุนแรงสูง", high)
+    k3.metric("⏳ รอดำเนินการ", pending)
+    k4.metric("🛠️ กำลังซ่อมแซม", inprog)
+    k5.metric("✅ ซ่อมแซมแล้ว", done)
 
-    if not records:
-        st.markdown('<div class="empty-panel">ยังไม่มีข้อมูลสำหรับสร้างแดชบอร์ด</div>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if total == 0:
+        st.info("📭 ยังไม่มีข้อมูลสำหรับสร้างแดชบอร์ด กรุณาแจ้งความเสียหายก่อน")
     else:
-        df = records_to_dataframe(records)
+        # =====================================================
+        # แผนที่
+        # =====================================================
+        st.markdown("""<div class="section-header"><h4>🗺️ แผนที่จุดเกิดเหตุ</h4></div>""",
+                    unsafe_allow_html=True)
 
-        section("แผนที่จุดเกิดเหตุ", "แสดงตำแหน่งรางหัก รางชำรุด และรางแตกร้าวจากพิกัดที่บันทึก")
-        render_damage_map(records)
+        map_records = [r for r in records if r.get('lat') and r.get('lon')]
 
-        section("สถิติพื้นที่เกิดบ่อยและประเภทความเสียหาย")
-        left, right = st.columns(2)
-        with left:
-            st.markdown("#### พื้นที่/หน่วยงานที่เกิดบ่อย")
-            area_df = count_series(df, "หน่วยงาน/เขต", top=10).set_index("หน่วยงาน/เขต")
-            st.bar_chart(area_df)
-        with right:
-            st.markdown("#### ประเภทความเสียหาย")
-            type_df = count_series(df, "ประเภทหลัก").set_index("ประเภทหลัก")
-            st.bar_chart(type_df)
+        if len(map_records) == 0:
+            st.info("⚠️ ยังไม่มีข้อมูลพิกัดสำหรับแสดงบนแผนที่  "
+                    "กรุณากรอก ละติจูด/ลองจิจูด หรือชื่อสถานี ตอนแจ้งเหตุ")
+        else:
+            # สีตามประเภทความเสียหาย
+            type_color_map = {
+                "รางหัก (Rail Break)":       "red",
+                "รางแตกร้าว (Rail Crack)":   "orange",
+                "รางชำรุด (Rail Defect)":    "blue",
+                "รางบิดเบี้ยว (Rail Twist)": "purple",
+                "รางสึกกร่อน (Rail Wear)":   "gray",
+                "รอยเชื่อมแตก (Weld Fracture)": "darkred",
+                "หมอนรถไฟชำรุด (Sleeper Defect)": "cadetblue",
+                "หินโรยทางทรุด (Ballast Settlement)": "beige",
+                "สลักยึดรางชำรุด (Fastener Defect)": "darkblue",
+            }
 
-        section("สถานะการซ่อมแซมและระดับความรุนแรง")
-        left2, right2 = st.columns(2)
-        with left2:
-            st.markdown("#### สถานะการซ่อมแซม")
-            status_df = count_series(df, "สถานะ").set_index("สถานะ")
-            st.bar_chart(status_df)
-        with right2:
-            st.markdown("#### ระดับความรุนแรง")
-            sev_df = count_series(df, "ความรุนแรง").set_index("ความรุนแรง")
-            st.bar_chart(sev_df)
+            avg_lat = sum(r['lat'] for r in map_records) / len(map_records)
+            avg_lon = sum(r['lon'] for r in map_records) / len(map_records)
+            m = folium.Map(location=[avg_lat, avg_lon], zoom_start=6,
+                           tiles="CartoDB positron")
 
-        section("ตารางข้อมูลสำหรับติดตามงาน")
-        st.dataframe(df, use_container_width=True, hide_index=True)
+            for r in map_records:
+                icon_color = type_color_map.get(r.get('type', ''), 'blue')
+                sev_icon   = {'high': 'exclamation-sign', 'med': 'warning-sign', 'low': 'info-sign'}.get(r.get('severity'), 'info-sign')
+                popup_html = f"""
+                <div style='font-family:Sarabun,sans-serif; min-width:220px'>
+                    <b style='color:#1a3a6b'>{r.get('id')}</b><br>
+                    <b>สาย:</b> {r.get('line','–')}<br>
+                    <b>สถานี:</b> {r.get('station','–')} (KM {r.get('km','–')})<br>
+                    <b>ประเภท:</b> {r.get('type','–')}<br>
+                    <b>ความรุนแรง:</b> {SEVERITY_MAP.get(r.get('severity'),'–')}<br>
+                    <b>สถานะ:</b> {STATUS_MAP.get(r.get('status'),'–')}<br>
+                    <b>วันที่:</b> {r.get('date','–')}<br>
+                    <b>ผู้รายงาน:</b> {r.get('reporter','–')}
+                </div>"""
+                folium.Marker(
+                    location=[r['lat'], r['lon']],
+                    popup=folium.Popup(popup_html, max_width=280),
+                    tooltip=f"{r.get('type','–')} | {r.get('station','–')}",
+                    icon=folium.Icon(color=icon_color, icon=sev_icon, prefix='glyphicon')
+                ).add_to(m)
+
+            # Legend
+            legend_html = """
+            <div style='position:fixed; bottom:30px; left:30px; z-index:1000;
+                        background:white; padding:12px 16px; border-radius:10px;
+                        box-shadow:0 2px 8px rgba(0,0,0,0.15); font-family:Sarabun,sans-serif; font-size:13px'>
+                <b>ประเภทความเสียหาย</b><br>
+                🔴 รางหัก &nbsp; 🟠 รางแตกร้าว &nbsp; 🔵 รางชำรุด<br>
+                🟣 รางบิดเบี้ยว &nbsp; ⚫ รางสึกกร่อน &nbsp; 🟤 รอยเชื่อมแตก
+            </div>"""
+            m.get_root().html.add_child(folium.Element(legend_html))
+
+            st_folium(m, width="100%", height=480)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # =====================================================
+        # Charts row 1: ประเภท + พื้นที่เกิดบ่อย
+        # =====================================================
+        ch1, ch2 = st.columns(2)
+
+        with ch1:
+            st.markdown("""<div class="section-header"><h4>💥 สถิติประเภทความเสียหาย</h4></div>""",
+                        unsafe_allow_html=True)
+            type_counts = {}
+            for r in records:
+                t = r.get('type', 'ไม่ระบุ')
+                type_counts[t] = type_counts.get(t, 0) + 1
+            type_df = pd.DataFrame({'ประเภท': list(type_counts.keys()),
+                                    'จำนวน': list(type_counts.values())})
+            type_df = type_df.sort_values('จำนวน', ascending=True)
+            fig_type = px.bar(
+                type_df, x='จำนวน', y='ประเภท', orientation='h',
+                color='จำนวน',
+                color_continuous_scale=['#93c5fd', '#1e4d9e', '#1a3a6b'],
+                template='plotly_white'
+            )
+            fig_type.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                font=dict(family='Sarabun', size=13),
+                showlegend=False,
+                coloraxis_showscale=False,
+                height=320
+            )
+            st.plotly_chart(fig_type, use_container_width=True)
+
+        with ch2:
+            st.markdown("""<div class="section-header"><h4>📍 พื้นที่/สถานีที่เกิดบ่อย (Top 10)</h4></div>""",
+                        unsafe_allow_html=True)
+            station_counts = {}
+            for r in records:
+                s = r.get('station') or r.get('line', 'ไม่ระบุ')
+                if not s:
+                    s = 'ไม่ระบุ'
+                station_counts[s] = station_counts.get(s, 0) + 1
+            top_stations = sorted(station_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+            sta_df = pd.DataFrame(top_stations, columns=['สถานี', 'จำนวน'])
+            sta_df = sta_df.sort_values('จำนวน', ascending=True)
+            fig_sta = px.bar(
+                sta_df, x='จำนวน', y='สถานี', orientation='h',
+                color='จำนวน',
+                color_continuous_scale=['#bbf7d0', '#16a34a', '#14532d'],
+                template='plotly_white'
+            )
+            fig_sta.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                font=dict(family='Sarabun', size=13),
+                showlegend=False,
+                coloraxis_showscale=False,
+                height=320
+            )
+            st.plotly_chart(fig_sta, use_container_width=True)
+
+        # =====================================================
+        # Charts row 2: สถานะ + ความรุนแรง
+        # =====================================================
+        ch3, ch4 = st.columns(2)
+
+        with ch3:
+            st.markdown("""<div class="section-header"><h4>🔧 สถานะการซ่อมแซม</h4></div>""",
+                        unsafe_allow_html=True)
+            stat_counts = {STATUS_MAP[k]: len([r for r in records if r.get('status') == k])
+                           for k in STATUS_MAP}
+            fig_stat = go.Figure(go.Pie(
+                labels=list(stat_counts.keys()),
+                values=list(stat_counts.values()),
+                marker_colors=['#6366f1', '#f59e0b', '#10b981'],
+                hole=0.5,
+                textinfo='label+percent+value',
+                textfont=dict(family='Sarabun', size=13)
+            ))
+            fig_stat.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10),
+                font=dict(family='Sarabun', size=13),
+                showlegend=True,
+                height=300,
+                legend=dict(orientation='h', yanchor='bottom', y=-0.25, xanchor='center', x=0.5)
+            )
+            st.plotly_chart(fig_stat, use_container_width=True)
+
+        with ch4:
+            st.markdown("""<div class="section-header"><h4>⚠️ ระดับความรุนแรง</h4></div>""",
+                        unsafe_allow_html=True)
+            sev_counts = {SEVERITY_MAP[k]: len([r for r in records if r.get('severity') == k])
+                          for k in SEVERITY_MAP}
+            fig_sev = go.Figure(go.Pie(
+                labels=list(sev_counts.keys()),
+                values=list(sev_counts.values()),
+                marker_colors=['#16a34a', '#d97706', '#dc2626'],
+                hole=0.5,
+                textinfo='label+percent+value',
+                textfont=dict(family='Sarabun', size=13)
+            ))
+            fig_sev.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10),
+                font=dict(family='Sarabun', size=13),
+                showlegend=True,
+                height=300,
+                legend=dict(orientation='h', yanchor='bottom', y=-0.25, xanchor='center', x=0.5)
+            )
+            st.plotly_chart(fig_sev, use_container_width=True)
+
+        # =====================================================
+        # Timeline
+        # =====================================================
+        st.markdown("""<div class="section-header"><h4>📈 แนวโน้มการรายงานตามวัน</h4></div>""",
+                    unsafe_allow_html=True)
+        date_counts = {}
+        for r in records:
+            d = r.get('date', '')
+            if d:
+                date_counts[d] = date_counts.get(d, 0) + 1
+        if date_counts:
+            date_df = pd.DataFrame({'วันที่': list(date_counts.keys()),
+                                    'จำนวน': list(date_counts.values())})
+            date_df['วันที่'] = pd.to_datetime(date_df['วันที่'])
+            date_df = date_df.sort_values('วันที่')
+            fig_line = px.area(
+                date_df, x='วันที่', y='จำนวน',
+                color_discrete_sequence=['#2563eb'],
+                template='plotly_white',
+                markers=True
+            )
+            fig_line.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                font=dict(family='Sarabun', size=13),
+                height=260
+            )
+            fig_line.update_traces(
+                line=dict(width=2.5),
+                marker=dict(size=7),
+                fillcolor='rgba(37,99,235,0.12)'
+            )
+            st.plotly_chart(fig_line, use_container_width=True)
+
+        # =====================================================
+        # สรุปตาราง
+        # =====================================================
+        st.markdown("""<div class="section-header"><h4>📋 สรุปรายการล่าสุด (10 รายการ)</h4></div>""",
+                    unsafe_allow_html=True)
+        latest = sorted(records, key=lambda x: x.get('createdAt', ''), reverse=True)[:10]
+        summary_df = pd.DataFrame([{
+            'รหัส':        r.get('id'),
+            'วันที่':      r.get('date'),
+            'สาย':         r.get('line','–'),
+            'สถานี':       r.get('station','–'),
+            'ประเภท':      r.get('type','–'),
+            'ความรุนแรง':  SEVERITY_MAP.get(r.get('severity'),'–'),
+            'สถานะ':       STATUS_MAP.get(r.get('status'),'–'),
+            'ผู้รายงาน':  r.get('reporter','–'),
+        } for r in latest])
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
