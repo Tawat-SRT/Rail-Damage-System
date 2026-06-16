@@ -10,6 +10,10 @@ import os
 from pathlib import Path
 import random
 import csv
+import base64
+import urllib.error
+import urllib.parse
+import urllib.request
 from io import StringIO
 import pandas as pd
 
@@ -217,6 +221,16 @@ st.markdown("""
         padding: 12px 14px;
         margin-bottom: 12px;
     }
+    .sync-pill {
+        background: rgba(255,255,255,0.13);
+        border: 1px solid rgba(255,255,255,0.22);
+        border-radius: 10px;
+        padding: 9px 10px;
+        font-size: 12px;
+        line-height: 1.45;
+        margin: 10px 0;
+        text-align: center;
+    }
     div[data-testid="stExpander"] details summary p {
         font-weight: 800 !important;
         color: #0f2f5f !important;
@@ -229,7 +243,88 @@ APP_DIR = Path(__file__).resolve().parent
 DATA_FILE = APP_DIR / 'data' / 'rail_damage_records.json'
 DATA_FILE.parent.mkdir(exist_ok=True)
 
+def get_secret_value(key, default=""):
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return os.environ.get(key, default)
+
+GITHUB_REPO = get_secret_value("GITHUB_REPO")
+GITHUB_TOKEN = get_secret_value("GITHUB_TOKEN")
+GITHUB_BRANCH = get_secret_value("GITHUB_BRANCH", "main")
+GITHUB_DATA_PATH = get_secret_value("GITHUB_DATA_PATH", "data/rail_damage_records.json")
+
+def github_storage_enabled():
+    return bool(GITHUB_REPO and GITHUB_TOKEN and GITHUB_DATA_PATH)
+
+def github_api_request(url, method="GET", payload=None):
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "User-Agent": "rail-damage-reporting-system",
+    }
+    data = None
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+def load_records_from_github():
+    if not github_storage_enabled():
+        return None
+
+    path = urllib.parse.quote(str(GITHUB_DATA_PATH).strip("/"))
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+    try:
+        data = github_api_request(url)
+        content = base64.b64decode(data.get("content", "")).decode("utf-8")
+        return json.loads(content) if content.strip() else []
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return []
+        st.warning("ไม่สามารถอ่านข้อมูลกลางได้ชั่วคราว ระบบจะแสดงข้อมูลจากเครื่องนี้ก่อน")
+        return None
+    except Exception:
+        st.warning("ไม่สามารถเชื่อมต่อข้อมูลกลางได้ชั่วคราว ระบบจะแสดงข้อมูลจากเครื่องนี้ก่อน")
+        return None
+
+def save_records_to_github(records):
+    if not github_storage_enabled():
+        return False
+
+    path = urllib.parse.quote(str(GITHUB_DATA_PATH).strip("/"))
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    sha = None
+
+    try:
+        current = github_api_request(f"{url}?ref={GITHUB_BRANCH}")
+        sha = current.get("sha")
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+    payload = {
+        "message": "Update rail damage records",
+        "content": base64.b64encode(
+            json.dumps(records, ensure_ascii=False, indent=2).encode("utf-8")
+        ).decode("ascii"),
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    github_api_request(url, method="PUT", payload=payload)
+    return True
+
 def load_records():
+    remote_records = load_records_from_github()
+    if remote_records is not None:
+        return remote_records
+
     if DATA_FILE.exists():
         with DATA_FILE.open('r', encoding='utf-8') as f:
             try:
@@ -242,6 +337,11 @@ def save_records(records):
     DATA_FILE.parent.mkdir(exist_ok=True)
     with DATA_FILE.open('w', encoding='utf-8') as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
+    if github_storage_enabled():
+        try:
+            save_records_to_github(records)
+        except Exception:
+            st.warning("บันทึกในเครื่องนี้แล้ว แต่ยังส่งข้อมูลไปแหล่งข้อมูลกลางไม่สำเร็จ กรุณาลองอัปเดตอีกครั้ง")
 
 def generate_id():
     recs = load_records()
@@ -277,6 +377,27 @@ def save_uploaded_files(uploaded_files, record_id):
         saved_files.append(str(target.relative_to(APP_DIR)))
 
     return saved_files
+
+def option_index(options, value, default=0):
+    try:
+        return options.index(value)
+    except ValueError:
+        return default
+
+def parse_date_value(value):
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except Exception:
+        return datetime.today().date()
+
+def parse_time_value(value):
+    try:
+        return datetime.strptime(str(value).split('.')[0], "%H:%M:%S").time()
+    except Exception:
+        try:
+            return datetime.strptime(str(value), "%H:%M").time()
+        except Exception:
+            return datetime.now().time()
 
 # ---- หน่วยงานจากไฟล์ Excel ----
 DEPARTMENTS = [
@@ -605,12 +726,20 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"""
     <div style='font-size:12px; opacity:0.6; text-align:center;'>
-        เวอร์ชัน 2.3.0<br>
+        เวอร์ชัน 2.4.0<br>
         อัปเดต: {datetime.now().strftime('%d/%m/%Y')}
         <div class="sidebar-credit">
             จัดทำโดย<br>
             กองทางถาวร และกองเทคนิคทางถาวร
         </div>
+    </div>
+    """, unsafe_allow_html=True)
+    sync_label = "ข้อมูลกลางเปิดใช้งาน" if github_storage_enabled() else "ข้อมูลเก็บในเครื่องนี้"
+    sync_note = "ทุกอุปกรณ์ที่ใช้ backend เดียวกันจะเห็นข้อมูลล่าสุด" if github_storage_enabled() else "ตั้งค่า GITHUB_* ใน Secrets เพื่อแชร์หลายอุปกรณ์"
+    st.markdown(f"""
+    <div class="sync-pill">
+        <strong>{sync_label}</strong><br>
+        {sync_note}
     </div>
     """, unsafe_allow_html=True)
 
@@ -1059,50 +1188,185 @@ elif menu == "📋 รายการแจ้งเหตุ":
                 f"กม. {r.get('km','–')}  |  "
                 f"{r.get('type','–')}  |  ความรุนแรง: {sev_label}"
             ):
-                cd1, cd2 = st.columns(2)
-                with cd1:
-                    st.markdown(f"**เลขที่ระบบ:** {r.get('id')}")
-                    st.markdown(f"**📅 วันที่-เวลา:** {r.get('date')} เวลา {r.get('time')}")
-                    st.markdown(f"**📍 ตำแหน่ง:** KM {r.get('km','–')}  |  {r.get('station','–')}")
-                    if fd:
-                        st.markdown(f"**ช่วงสถานี:** {fd.get('stationFrom','–')} - {fd.get('stationTo','–')}")
-                        st.markdown(f"**ลักษณะทาง:** {fd.get('alignment','–')} | {fd.get('wetDry','–')} | ลาดชัน {fd.get('grade','–')}")
-                        st.markdown(f"**ขนาดราง:** {fd.get('railSize','–')} | ยาว {fd.get('railLength','–')} ม.")
-                    st.markdown(f"**💥 ประเภท:** {r.get('type','–')}")
-                    st.markdown(f"**📐 ขนาด:** {r.get('length','–')}")
-                    st.markdown(f"**📝 รายละเอียด:** {r.get('detail','–')}")
-                    st.markdown(f"**💡 การดำเนินการ:** {r.get('action','–')}")
-                with cd2:
-                    st.markdown(f"**👤 ผู้รายงาน:** {r.get('reporter','–')}")
-                    st.markdown(f"**💼 ตำแหน่ง:** {r.get('position','–')}")
-                    st.markdown(f"**🏢 หน่วยงาน:** {r.get('dept','–')}")
-                    st.markdown(f"**📞 ติดต่อ:** {r.get('phone','–')}")
-                    if fd:
-                        st.markdown(f"**ผู้ตรวจพบ:** {fd.get('foundBy','–')} | {fd.get('foundContext','–')}")
-                        st.markdown(f"**สภาพรอยร้าว:** {fd.get('crackAge','–')} | อุณหภูมิ {fd.get('railTemperature','–')}")
-                        head_damage = ', '.join(fd.get('headDamage', [])) if fd.get('headDamage') else '–'
-                        st.markdown(f"**หัวราง:** {head_damage}")
-                        attachments = fd.get('attachments', [])
-                        if attachments:
-                            st.markdown(f"**ไฟล์แนบ:** {len(attachments)} ไฟล์")
-                    st.markdown("---")
-                    new_status = st.selectbox(
-                        "🔄 สถานะการซ่อมแซม",
-                        options=list(STATUS_MAP.keys()),
-                        index=list(STATUS_MAP.keys()).index(r.get('status', 'pending')),
-                        format_func=lambda x: STATUS_MAP[x],
-                        key=f"status_{r.get('id')}"
-                    )
-                    cb1, cb2 = st.columns(2)
-                    if cb1.button("🔄 อัปเดต", key=f"upd_{r.get('id')}"):
-                        records[orig_idx]['status'] = new_status
-                        save_records(records)
-                        st.success("อัปเดตแล้ว!")
-                        st.rerun()
-                    if cb2.button("🗑️ ลบ", key=f"del_{r.get('id')}"):
-                        records.pop(orig_idx)
-                        save_records(records)
-                        st.rerun()
+                detail_tab, edit_tab = st.tabs(["รายละเอียด", "แก้ไขข้อมูล"])
+
+                with detail_tab:
+                    cd1, cd2 = st.columns(2)
+                    with cd1:
+                        st.markdown(f"**เลขที่ระบบ:** {r.get('id')}")
+                        st.markdown(f"**📅 วันที่-เวลา:** {r.get('date')} เวลา {r.get('time')}")
+                        st.markdown(f"**📍 ตำแหน่ง:** KM {r.get('km','–')}  |  {r.get('station','–')}")
+                        if fd:
+                            st.markdown(f"**ช่วงสถานี:** {fd.get('stationFrom','–')} - {fd.get('stationTo','–')}")
+                            st.markdown(f"**ลักษณะทาง:** {fd.get('alignment','–')} | {fd.get('wetDry','–')} | ลาดชัน {fd.get('grade','–')}")
+                            st.markdown(f"**ขนาดราง:** {fd.get('railSize','–')} | ยาว {fd.get('railLength','–')} ม.")
+                        st.markdown(f"**💥 ประเภท:** {r.get('type','–')}")
+                        st.markdown(f"**📐 ขนาด:** {r.get('length','–')}")
+                        st.markdown(f"**📝 รายละเอียด:** {r.get('detail','–')}")
+                        st.markdown(f"**💡 การดำเนินการ:** {r.get('action','–')}")
+                    with cd2:
+                        st.markdown(f"**👤 ผู้รายงาน:** {r.get('reporter','–')}")
+                        st.markdown(f"**💼 ตำแหน่ง:** {r.get('position','–')}")
+                        st.markdown(f"**🏢 หน่วยงาน:** {r.get('dept','–')}")
+                        st.markdown(f"**📞 ติดต่อ:** {r.get('phone','–')}")
+                        if fd:
+                            st.markdown(f"**ผู้ตรวจพบ:** {fd.get('foundBy','–')} | {fd.get('foundContext','–')}")
+                            st.markdown(f"**สภาพรอยร้าว:** {fd.get('crackAge','–')} | อุณหภูมิ {fd.get('railTemperature','–')}")
+                            head_damage = ', '.join(fd.get('headDamage', [])) if fd.get('headDamage') else '–'
+                            st.markdown(f"**หัวราง:** {head_damage}")
+                            attachments = fd.get('attachments', [])
+                            if attachments:
+                                st.markdown(f"**ไฟล์แนบ:** {len(attachments)} ไฟล์")
+
+                with edit_tab:
+                    line_options = ["-- เลือกสายทาง --"] + RAILWAY_LINES
+                    if r.get('line') and r.get('line') not in line_options:
+                        line_options.append(r.get('line'))
+                    type_options = ["-- เลือกประเภท --"] + DAMAGE_TYPES
+                    if r.get('type') and r.get('type') not in type_options:
+                        type_options.append(r.get('type'))
+
+                    with st.form(f"edit_form_{r.get('id')}"):
+                        st.markdown("##### แก้ไขข้อมูลรายงาน")
+                        e0, e1, e2 = st.columns(3)
+                        with e0:
+                            edit_report_no = st.text_input("เลขที่รายงาน", value=fd.get('reportNo', ''), key=f"report_no_{r.get('id')}")
+                        with e1:
+                            edit_date = st.date_input("วันที่พบเหตุ", value=parse_date_value(r.get('date')), key=f"date_{r.get('id')}")
+                        with e2:
+                            edit_time = st.time_input("เวลาที่พบเหตุ", value=parse_time_value(r.get('time')), key=f"time_{r.get('id')}")
+
+                        e3, e4, e5 = st.columns(3)
+                        with e3:
+                            edit_line = st.selectbox("สายทาง", line_options, index=option_index(line_options, r.get('line'), 0), key=f"line_{r.get('id')}")
+                        with e4:
+                            edit_km = st.text_input("กม.", value=r.get('km', ''), key=f"km_{r.get('id')}")
+                        with e5:
+                            edit_station = st.text_input("สถานี/ช่วงสถานี", value=r.get('station', ''), key=f"station_{r.get('id')}")
+
+                        e6, e7, e8 = st.columns(3)
+                        with e6:
+                            edit_type = st.selectbox("ประเภทเหตุ", type_options, index=option_index(type_options, r.get('type'), 0), key=f"type_{r.get('id')}")
+                        with e7:
+                            edit_severity = st.selectbox(
+                                "ระดับความรุนแรง",
+                                list(SEVERITY_MAP.keys()),
+                                index=option_index(list(SEVERITY_MAP.keys()), r.get('severity', 'low'), 0),
+                                format_func=lambda x: "สูง" if x == 'high' else "ปานกลาง" if x == 'med' else "ต่ำ",
+                                key=f"severity_{r.get('id')}"
+                            )
+                        with e8:
+                            edit_status = st.selectbox(
+                                "สถานะการซ่อมแซม",
+                                list(STATUS_MAP.keys()),
+                                index=option_index(list(STATUS_MAP.keys()), r.get('status', 'pending'), 0),
+                                format_func=lambda x: STATUS_MAP[x],
+                                key=f"status_edit_{r.get('id')}"
+                            )
+
+                        e9, e10, e11 = st.columns(3)
+                        with e9:
+                            edit_rail_size = st.text_input("ขนาด/น้ำหนักราง", value=fd.get('railSize', ''), key=f"rail_size_{r.get('id')}")
+                        with e10:
+                            edit_length = st.text_input("ความยาว/ขนาดชำรุด", value=r.get('length', ''), key=f"length_{r.get('id')}")
+                        with e11:
+                            edit_rail_mark = st.text_input("เครื่องหมายราง", value=r.get('railId', ''), key=f"rail_mark_{r.get('id')}")
+
+                        e12, e13, e14 = st.columns(3)
+                        with e12:
+                            edit_station_from = st.text_input("ระหว่างสถานี", value=fd.get('stationFrom', ''), key=f"station_from_{r.get('id')}")
+                        with e13:
+                            edit_station_to = st.text_input("และ", value=fd.get('stationTo', ''), key=f"station_to_{r.get('id')}")
+                        with e14:
+                            edit_found_by = st.text_input("ตรวจพบโดย", value=fd.get('foundBy', ''), key=f"found_by_{r.get('id')}")
+
+                        e15, e16 = st.columns(2)
+                        with e15:
+                            edit_reporter = st.text_input("ผู้รายงาน", value=r.get('reporter', ''), key=f"reporter_{r.get('id')}")
+                            edit_position = st.text_input("ตำแหน่ง", value=r.get('position', ''), key=f"position_{r.get('id')}")
+                            edit_dept = st.text_input("หน่วยงาน/เขต", value=r.get('dept', ''), key=f"dept_{r.get('id')}")
+                            edit_phone = st.text_input("เบอร์โทรศัพท์", value=r.get('phone', ''), key=f"phone_{r.get('id')}")
+                        with e16:
+                            edit_lat = st.text_input("ละติจูด", value="" if r.get('lat') is None else str(r.get('lat')), key=f"lat_{r.get('id')}")
+                            edit_lon = st.text_input("ลองจิจูด", value="" if r.get('lon') is None else str(r.get('lon')), key=f"lon_{r.get('id')}")
+                            edit_note = st.text_area("หมายเหตุ", value=fd.get('note', ''), height=82, key=f"note_{r.get('id')}")
+
+                        edit_detail = st.text_area("รายละเอียด", value=r.get('detail', ''), height=90, key=f"detail_{r.get('id')}")
+                        edit_action = st.text_area("การดำเนินการ", value=r.get('action', ''), height=90, key=f"action_{r.get('id')}")
+                        edit_attachments = st.file_uploader(
+                            "เพิ่มรูปแนบ/รูปตัด/ภาพถ่าย",
+                            type=["png", "jpg", "jpeg"],
+                            accept_multiple_files=True,
+                            key=f"attachments_{r.get('id')}"
+                        )
+
+                        save_col, delete_col = st.columns([3, 1])
+                        save_submit = save_col.form_submit_button("บันทึกการแก้ไข", use_container_width=True)
+                        delete_submit = delete_col.form_submit_button("ลบรายการ", use_container_width=True)
+
+                        if save_submit:
+                            errors = []
+                            if edit_line == "-- เลือกสายทาง --": errors.append("สายทาง")
+                            if edit_type == "-- เลือกประเภท --": errors.append("ประเภทเหตุ")
+                            if not edit_km.strip(): errors.append("กม.")
+                            if not edit_reporter.strip(): errors.append("ผู้รายงาน")
+                            if not edit_dept.strip(): errors.append("หน่วยงาน/เขต")
+
+                            if errors:
+                                st.error(f"กรุณากรอก/เลือก: {', '.join(errors)}")
+                            else:
+                                try:
+                                    edit_lat_value = float(edit_lat) if edit_lat.strip() else None
+                                    edit_lon_value = float(edit_lon) if edit_lon.strip() else None
+                                except ValueError:
+                                    edit_lat_value = r.get('lat')
+                                    edit_lon_value = r.get('lon')
+                                    st.warning("พิกัดไม่ถูกต้อง จึงคงค่าพิกัดเดิมไว้")
+
+                                updated_fd = dict(fd)
+                                updated_fd.update({
+                                    'reportNo': edit_report_no,
+                                    'stationFrom': edit_station_from,
+                                    'stationTo': edit_station_to,
+                                    'railSize': edit_rail_size,
+                                    'foundBy': edit_found_by,
+                                    'note': edit_note,
+                                })
+                                if edit_attachments:
+                                    old_attachments = updated_fd.get('attachments', [])
+                                    updated_fd['attachments'] = old_attachments + save_uploaded_files(edit_attachments, r.get('id'))
+
+                                records[orig_idx].update({
+                                    'date': str(edit_date),
+                                    'time': str(edit_time),
+                                    'line': edit_line,
+                                    'station': edit_station,
+                                    'km': edit_km,
+                                    'railId': edit_rail_mark,
+                                    'type': edit_type,
+                                    'length': edit_length,
+                                    'severity': edit_severity,
+                                    'detail': edit_detail,
+                                    'action': edit_action,
+                                    'lat': edit_lat_value,
+                                    'lon': edit_lon_value,
+                                    'reporter': edit_reporter,
+                                    'position': edit_position,
+                                    'dept': edit_dept.strip(),
+                                    'phone': edit_phone,
+                                    'status': edit_status,
+                                    'formDetails': updated_fd,
+                                    'updatedAt': datetime.now().isoformat(),
+                                })
+                                save_records(records)
+                                st.success("บันทึกการแก้ไขแล้ว")
+                                st.rerun()
+
+                        if delete_submit:
+                            records.pop(orig_idx)
+                            save_records(records)
+                            st.success("ลบรายการแล้ว")
+                            st.rerun()
 
 
 # ================================================================
